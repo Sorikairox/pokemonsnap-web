@@ -54,12 +54,34 @@ as RDRAM holds it (uploaded on creation). It tracks the rows the GPU drew since 
 | When | What |
 |---|---|
 | texture load (LoadBlock / LoadTile / LoadTLUT) from bytes a GPU-drawn image covers | those rows are read back (`glReadPixels`) and written into RDRAM as **RGBA16** (5551, alpha bit = coverage ≥ 0.5) or RGBA32 before TMEM is filled → the detector's 8x8 LoadTile of the frame centre, score.c's copies of 64-wide images |
-| end of every task | all non-screen images (width ≠ 320/640) are written back (detector regions, score thumbnails: read by the CPU after the task) |
+| end of every task | every image the VI never showed is written back (S6; before: width ≠ 320/640 only): detector regions, score images, and the 320x210 photo renders of `window/847B60.c`, which the CPU averages into the camera-check / album sprites right after `gtlDrawOne` without `osInvalDCache` (they came out white) |
 | `osInvalDCache(p, n)` → `port_gfx_inval_dcache` | rows in range written back (CPU reads: `PokemonDetector_PostProcessImage`) |
 | an image fully written back | "clean": RDRAM is authoritative; before the next draw onto it or before the VI shows it, RDRAM is hashed and re-uploaded if the CPU changed it (the red focus dot) |
 | `osWritebackDCache(p, n)` → `port_gfx_writeback_dcache` | forces that hash check on images in range (n = 0: all) |
 | write-back of rows that overlap another image | that image is flagged for the same check |
-| FILL rectangle into a Z image's address | the depth buffer of every image used with that Z image is cleared to the fill value at its next bind (generation counter); 0xFFFC = far |
+| FILL rectangle over a Z image's rows (same width) | that Z image's depth texture is cleared in the rectangle (S6); rows of no known Z image are drawn as colour |
+
+**Z images (S6).** `score.c` (`func_800A007C`, called by the camera check and Oak's check through
+`window/847B60.c func_8037452C`) renders each photo again into a 64x48 image, gives every Pokémon its own 64x48 Z
+buffer (segment 0x0A), copies the current Z buffer into a "before" image with COPY texture rectangles (0x0C → 0x0B)
+and then **counts pixels in the Z buffers with the CPU** (`!= 0xFFFC`, equality between buffers): size, completeness,
+"well framed" and the same-Pokémon bonus all come from these counts. Z images are therefore GL depth textures
+(`DEPTH_COMPONENT24`) keyed by address and size, attached to whichever colour image is drawn with them, with the
+same coherence rules as colour images: dirty rows, written back on texture loads / `osInvalDCache` / at the end of
+each task (except Z images used with framebuffers: never read), loaded from RDRAM when clean and RDRAM changed
+(all-equal → clear, else a `gl_FragDepth` pass from an R32F texture). Format: the console's 16-bit Z, GL depth ×
+0x3FFFF = the 18-bit z (both linear in NDC z), compressed to a 3-bit exponent (leading ones) + 11-bit mantissa,
+`<< 2`, dz 0; 0xFFFC = depth 1.0 both ways. Equalities between buffers hold because the same geometry gives the same
+GL depth; the absolute values are not verified against a console. COPY mode keeps the texel's alpha (coverage) bit,
+so a copied Z buffer is bit-exact.
+
+**Read-back journal (S6, node parity).** Write-backs are the only GPU effect the game's CPU can see. A browser run
+records every byte they change (`port_rb_record`, gfx_rdp.c), grouped by the next point where the CPU can observe
+memory (end of a graphics task, `osInvalDCache`, VI frame); `port/web/run.mjs` saves it as `OUT/readback.bin` and
+`port/docker/run.sh port-test --readback OUT/readback.bin` (same `--frames/--tap/--tap-end/--input`, same build)
+writes the same bytes at the same points in node (the point kind is checked; `[readback] desync` is logged).
+Measured: Beach route to Oak's check, 14400 retraces: 26 MB journal, node gives the browser's 8310 `[task]` hashes
+(without it 5596 differ from retrace 3833, the first detector frame). ROM-derived: `port_work/` only.
 
 Because targets are native size, read-backs equal what the console's RDP would leave in RDRAM up to rasterisation
 rounding — detection (≥ 32 of 64 pixels changed) and thumbnails don't depend on the display. A later "high
@@ -103,7 +125,7 @@ is deterministic (same PNG hashes run to run); node gives the same `[task]` hash
 test RDRAM; `-sGLOBAL_BASE=256MB` so the address classes match the game), serves it on 127.0.0.1, runs the host's
 Chrome headless (SwiftShader, muted) over the DevTools protocol (`test/cdp.mjs`, node's built-in WebSocket), and
 writes `log.txt` (CHECK lines), `shown.png` / `shown2.png` (canvas) and `rdram.png` / `rdram2.png` (RDRAM after
-write-back) to `port/build/gfx_test/out/` (gitignored). Two tasks, 17 checks: SP/DP events, culling, no unknown
+write-back) to `port/build/gfx_test/out/` (gitignored). Two tasks, 18 checks (S6: `z_writeback`, a 64x48 Z image in the console format + its COPY into a colour image): SP/DP events, culling, no unknown
 opcodes / bad addresses, the detector's LoadTile + COPY into an 8-wide image equals the frame centre (64/64),
 FILL, Z buffer, a 64-wide image with its own Z copied back via LoadBlock in the same task, CI4 + TLUT + alpha
 compare, RGBA16 wrap, RGBA32, IA16, I4, mirror, 2-cycle TEXEL0/TEXEL1, matrix push/mul/pop, `gSPMvpRecalc` +
@@ -118,7 +140,8 @@ compare, RGBA16 wrap, RGBA32, IA16, I4, mirror, 2-cycle TEXEL0/TEXEL1, matrix pu
   clamp), the 16-bit Z format (clears map 0xFFFC → far linearly), `G_BRANCH_Z` threshold units untested.
 - CPU writes into an image that still has GPU-dirty rows (only partly written back) are not detected or uploaded;
   Snap's red dot follows a full-frame `osInvalDCache`, so it is not affected.
-- A Z image's RDRAM is never written (no game code reads it, as far as the survey shows).
+- Z values are the console's format by construction (linear depth → 18-bit z → compressed); not compared with a
+  console capture. dz is always 0.
 - Performance: no measurement yet on real frames; per-draw uniform uploads; texture hash per tile change.
 - Seen on real frames (S3c): every texture rectangle is its own draw (a texture load between rectangles sets
   `state_dirty`): ~8000 draws per 150 retraces on the menus; fine on SwiftShader (5.6 ms per retrace for the whole

@@ -2,6 +2,70 @@
 
 Newest session first. Read `docs/port/PLAN.md` (goal, survey, approach, phases, rules) before working.
 
+## S6 — 2026-11-09: photos, Oak's check scored, node follows the browser (read-back journal)
+
+Root causes, each fixed in the renderer / harness (no game C edits; matching build unchanged), one commit each:
+
+1. **White thumbnails** (2a44b1d): `window/847B60.c` renders each photo into a gtlMalloc'd **320x210** colour image
+   and averages it 2x2 into the camera-check / album sprites with the CPU right after `gtlDrawOne`, without
+   `osInvalDCache`. The renderer only wrote back images narrower than 320 at task end (the thin sky strip was rows an
+   earlier write-back had covered). Now every image the VI never showed is written back at task end.
+2. **No Pokémon identified / Oak's Mark disabled** (2e19d56): `score.c` (`func_800A007C`) re-renders the photo at
+   64x48 and counts each Pokémon's pixels **in Z buffers** with the CPU (`!= 0xFFFC`, buffer equalities, a Z copy
+   through COPY texture rectangles); the renderer's depth never reached RDRAM, so every count was 0,
+   `score.pokemonInFocus` 0 (camera_check `func_camera_check_801E3D8C`), Oak's Mark did nothing. Z images are now
+   RDRAM-coherent depth textures in the console's 16-bit Z format (RENDERER.md "Z images"); COPY keeps the alpha bit.
+   gfx test `z_writeback` (18/18).
+3. **Route input** (da9cf3b): the camera-check menus move with the stick only: `--input F:MASK[:LEN[:X[:Y]]]` and
+   `--tap-end F`, node and browser.
+4. **Node parity** (0c995f2): read-back journal (RENDERER.md): a browser run records every byte write-backs change per
+   CPU-observation point; `port-test --readback OUT/readback.bin` replays it. Chosen over a software rasteriser for
+   the 8x8 regions: exact by construction (any approximation diverges at the first focus test), no per-region
+   special cases, covers Z / photo / score write-backs too. Cost: one journal per route and build (26 MB for Beach).
+
+Route (Beach -> camera check -> Oak's check -> lab), `A=$(for f in $(seq 14400 120 16200); do printf ",%d:0x8000:3" $f; done)`:
+`node port/web/run.mjs --out port_work/s6_d --frames 16500 --every 3000 --shots ... --tap 120 0x8000 --tap-end 13300
+--input 2940:0x4000:3,4000:0x2000:400,13400:0x4000:3,13460:0:3:0:-80,13500:0:3:0:-80,13560:0x8000:3,13680:0x8000:3,13800:0x8000:3,13920:0x8000:3,14040:0x8000:3,14160:0x8000:3$A`
+(B at 13400 keeps the Pidgey pick, stick down x2 -> "To Prof. Oak", A's through the confirmations and Oak's comments).
+
+Verified (screenshots looked at, `port_work/`, never committed):
+- `s6_a/f13200.png`: camera check, 3 thumbnails now show the Pidgey photos (rail, cliffs, sky, Pidgey).
+- `s6_b/f13350.png`: Oak's Mark -> "I've decided on PIDGEY" with the full-size photo; `s6_c/f13540.png` marked photo,
+  "To Prof. Oak"; `f13600` "Show this picture to Prof. Oak?"; `f13720` "PROF. OAK'S CHECK" title fade; `f14050`
+  "This is PIDGEY!!"; `s6_d/f14600..f15600`: Size 490, Pose 800, Technique x2 ("right in the middle of the
+  frame"), Same PKMN 230, **Total 2810**, "Wonderful! Your work is impeccable."; `f16500` back in Oak's lab.
+- Determinism: `s6_d` vs `s6_e` (same route): 29/29 PNGs, `[task]` logs and journals identical.
+- Node parity: `s6_node_c` (14400) and `s6_node_d` (16500) with the journals: `[task]` hashes identical to the
+  browser (8310 / 10223 tasks); without the journal (`s6_node_c_norb`) they differ from retrace 3833.
+- `port/gfx/test/run.sh` 18/18; node `port-test` 5000 retraces OK (`s6_node5000`); matching build OK; browser cost
+  unchanged (~7.4 ms per retrace; Z resolves only on score renders).
+
+Verified vs assumed (Oak's score): the arithmetic on screen follows score.c ((490 + 800) x 2 + 230 = 2810), Pidgey is
+identified, "well framed" means a Pidgey pixel in the 4x4 centre of the 64x48 Z buffer, the same-Pokémon bonus
+matches a second Pidgey visible in the thumbnail. **Assumed, not verified** (no emulator reference): the exact pixel
+counts (rasterisation at 64x48 with GL vs the RDP's edge rules: Size 490 = proximity x completeness could differ by
+a few %), and absolute Z values (only "far" and equalities are used by score.c). Pose 800 comes from the photo data
+(pose table), not from pixels.
+
+Goal 4 (film stuck at 57): **expected with that route**, not a bug. Photos are only taken zoomed in
+(`updateCameraZoomedIn`, player.c:1363); the route holds Z only 4000..4400, so after the tutorial's 3 photos the
+camera is zoomed out and A does nothing (zoomed-out A = items: none on a first run). `func_8009BBF4()` counts photos
+with a Pokémon in focus (`makePhoto(gPokemonInFocus)`, 47380.c `D_800AE27C++`): the tutorial releases input after 3
+of those. To take more photos the route must press Z again.
+
+### Remaining bugs / Next
+
+1. Renderer (not read-backs, unchanged): sky box corner rectangles, grey untextured cliffs / end tunnel (S5 notes);
+   Oak's check screens show a darker left band (x < 230, `s6_d/f14600.png`): probably a transition overlay, check.
+2. Score pixel counts vs the console (emulator run of the same photo, locally) when a reference is available.
+3. `camera_check.h UnkIndigoHalibut.unk_18_*` single-bit bitfields are not in PORT LSB-first order: harmless while
+   only C reads them; check if they reach the flash save (S8).
+4. Journal size (26 MB per Beach route): fine for tests; compress or record only CPU-read ranges if it grows.
+5. Next: S7 audio, S8 flash (album photos written there), S9 retrowser module; route Z presses later in the level for
+   more photos (Doduo, Pikachu...) to exercise more scoring cases.
+
+Downloads: none.
+
 ## S5 — 2026-11-09: Beach played start to end (world, Pokemon, detector, photos) by scripted input
 
 Four root causes, each fixed generally (no game C edits; matching build unchanged), one commit each:
