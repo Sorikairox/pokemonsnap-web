@@ -498,6 +498,41 @@ def k0_ptrs(text, st):
     return text
 
 
+# S5: function identity. Data the relocations do not cover (the `bin` blobs inside code segments: world block
+# descriptors, Pokemon tables, scene setups) holds functions as console addresses; calls through them work
+# (icall.py's __port_fptr_fix), but the game also compares them with its functions (world/block.c: `&drawSkyBox2Cycle
+# == gfx->renderFunc`), and a console address is never equal to a wasm function-table index. Every pointer equality
+# test whose operands are not both constants maps each non-constant operand through __port_fptr_canon (pc_icall.c):
+# a console / mirror address that is the start of a function of the overlay resident there becomes that function's
+# table index, anything else is unchanged. Two pointers compare equal exactly when they do on the console.
+FEQ = re.compile(r'^(\s*)(%[\w.$-]+) = icmp (eq|ne) ptr ([^,]+), ([^,]+?)((?:, !dbg !\d+)?)$', re.M)
+
+
+def fptr_eq(text, st):
+    n = [0]
+
+    def one(ind, v, out, dbg):
+        if not v.startswith('%'):
+            return v
+        n[0] += 1
+        t = f'%fq.{n[0]}'
+        out.append(f'{ind}{t} = call ptr @__port_fptr_canon(ptr {v}){dbg}')
+        return t
+
+    def sub(m):
+        ind, r, op, a, b, dbg = m[1], m[2], m[3], m[4].strip(), m[5].strip(), m[6]
+        if a == 'null' or b == 'null' or not (a.startswith('%') or b.startswith('%')):
+            return m[0]
+        out = []
+        a2, b2 = one(ind, a, out, dbg), one(ind, b, out, dbg)
+        st['fptr_eq'] += 1
+        return '\n'.join(out + [f'{ind}{r} = icmp {op} ptr {a2}, {b2}{dbg}'])
+    text = FEQ.sub(sub, text)
+    if st['fptr_eq'] and not re.search(r'^declare [^\n]*@__port_fptr_canon\(', text, re.M):
+        text += '\ndeclare ptr @__port_fptr_canon(ptr)\n'
+    return text
+
+
 # RCP / PI / SI register accesses through a constant KSEG1 address (rcp.h IO_READ / IO_WRITE in game C) are not
 # memory on the PC. Constant
 # 32-bit loads/stores in 0xA4000000..0xA4FFFFFF become calls to the PC register model
@@ -557,7 +592,7 @@ def main():
             absmap[n] = int(v, 16)
     st0 = collections.Counter()
     text = RENAME.sub(r'@vbe.\1', open(src).read())
-    text = k0_ptrs(rcp_io(abs_syms(text, absmap, st0), st0), st0)
+    text = fptr_eq(k0_ptrs(rcp_io(abs_syms(text, absmap, st0), st0), st0), st0)
     p = Pass(text.split('\n'))
     p.st.update(st0)
     if sigdb:  # canonical signatures (port/tools/sigs.py, collected by port_build.py before this pass)

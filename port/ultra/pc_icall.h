@@ -13,6 +13,7 @@ void __port_fsig_reg(const PortFsig *t, int n);   /* per-TU constructors */
 void __port_fvram_reg(const PortFvram *t, int n); /* per-TU constructors: console address of each function */
 unsigned __port_fsig(void *fp);                   /* 0 = unknown target */
 void *__port_fptr_fix(void *fp);                  /* console / mirror address -> function of the resident overlay */
+void *__port_fptr_canon(void *p);                 /* S5: pointer equality: a function address -> that function */
 void *port_n64_function(unsigned vram);
 u64_ __port_icall_slow(void *fp, unsigned tsig, const u64_ *b, int n, unsigned k, unsigned rk);
 void port_icall_note(void *fp, unsigned tsig, int n, unsigned k, unsigned rk);

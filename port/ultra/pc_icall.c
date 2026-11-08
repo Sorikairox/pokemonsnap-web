@@ -66,6 +66,15 @@ void *port_n64_function(uint32_t vram) {
     return nany == 1 ? any : NULL; /* not resident (yet): unambiguous only if one overlay has a function there */
 }
 
+/* the function at `vram` only if its overlay is resident there (NULL otherwise) */
+void *port_n64_function_resident(uint32_t vram) {
+    void *f = port_n64_function(vram);
+    const PortFvram *e = NULL;
+    for (unsigned i = 0; f && i < nfvram && !e; i++)
+        if (fvram[i].fn == f && fvram[i].vram == vram) e = &fvram[i];
+    return e && port_segment_resident(e->segment) ? f : NULL;
+}
+
 void *__port_fptr_fix(void *fp) {
     uintptr_t a = (uintptr_t)fp, b = (uintptr_t)n64_rdram;
     uint32_t vram = 0;
@@ -80,6 +89,36 @@ void *__port_fptr_fix(void *fp) {
     }
     if (fptr_fails++ < 16) port_log("[icall] function pointer %08X: no function there (console %08X)\n", (unsigned)a, vram);
     return fp;
+}
+
+/* S5: canonical form of a pointer for an equality test (vbe.py fptr_eq): a console or mirror address that is the
+ * start of a function of the overlay resident there -> that function (its table index); anything else unchanged.
+ * A bitmap of every compiled function's console start address keeps the common case (data pointers) cheap. */
+static unsigned char fstart_bits[PORT_RDRAM_SIZE / 4 / 8];
+static unsigned fstart_built, fptr_canons;
+
+static void fstart_build(void) {
+    for (unsigned i = 0; i < nfvram; i++) {
+        uint32_t o = fvram[i].vram - 0x80000000u;
+        if (o < PORT_RDRAM_SIZE) fstart_bits[o >> 5] |= (unsigned char)(1u << ((o >> 2) & 7));
+    }
+    fstart_built = nfvram;
+}
+
+void *__port_fptr_canon(void *p) {
+    uintptr_t a = (uintptr_t)p, b = (uintptr_t)n64_rdram;
+    uint32_t o;
+    if (a - b < PORT_RDRAM_SIZE) o = (uint32_t)(a - b);
+    else if (a >= 0x80000000u && a < 0x80000000u + PORT_RDRAM_SIZE) o = (uint32_t)(a - 0x80000000u);
+    else return p;
+    if (fstart_built != nfvram) fstart_build();
+    if ((o & 3) || !(fstart_bits[o >> 5] & (1u << ((o >> 2) & 7)))) return p;
+    void *f = port_n64_function_resident(0x80000000u + o);
+    if (!f) return p;
+    if (fptr_canons++ < 8)
+        port_log("[icall] pointer compare: %08X is fn #%u (console %08X)\n", (unsigned)a, (unsigned)(uintptr_t)f,
+                 0x80000000u + o);
+    return f;
 }
 
 /* ---------------------------------------------------------------- calls from the PC layer */
@@ -129,8 +168,8 @@ void port_icall_note(void *fp, unsigned tsig, int n, unsigned k, unsigned rk) {
 void port_icall_report(void) {
     port_log("[icall] %u functions registered (%u beyond the table cap, %u re-registered with another signature), "
              "%u console addresses; %u mismatched calls converted, %u void targets called as values; %u function "
-             "pointers mapped from addresses, %u not found\n", fsig_regs, fsig_over, fsig_clash, nfvram,
-             port_icall_slow_calls, void_nseen, fptr_fixes, fptr_fails);
+             "pointers mapped from addresses, %u not found; %u pointer compares saw a function address\n", fsig_regs,
+             fsig_over, fsig_clash, nfvram, port_icall_slow_calls, void_nseen, fptr_fixes, fptr_fails, fptr_canons);
 }
 
 /* function (table index) -> its console address, 0 if unknown (debug: port_thread_dump, S3c) */
