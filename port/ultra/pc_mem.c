@@ -13,6 +13,24 @@ void port_log(const char *fmt, ...) {
     va_end(ap);
 }
 
+/* S5: printf-style log callable from game C (debugging). The format string is a game C literal, so it is in vbe
+ * layout (byte a at a ^ 3); the variadic arguments are native (MEMORY.md "va_arg"). %s arguments would be vbe too:
+ * pass numbers only. Declare in game C as `extern void port_game_log(const char *, ...);`. */
+void port_game_log(const char *fmt, ...) {
+    char buf[512];
+    unsigned i = 0;
+    for (; i < sizeof buf - 1; i++) {
+        char c = *(const char *)((uintptr_t)(fmt + i) ^ 3);
+        if (!c) break;
+        buf[i] = c;
+    }
+    buf[i] = 0;
+    va_list ap;
+    va_start(ap, fmt);
+    vfprintf(stderr, buf, ap);
+    va_end(ap);
+}
+
 /* ---------------------------------------------------------------- addresses */
 void *port_n64_to_wasm(uint32_t addr) {
     uint32_t phys;

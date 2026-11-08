@@ -66,4 +66,5 @@ int port_segment_resident(unsigned si);
 const char *port_resident_at(uint32_t vram);
 
 void port_log(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
+void port_game_log(const char *fmt, ...); /* S5: from game C (format string in vbe layout; numbers only) */
 #endif
