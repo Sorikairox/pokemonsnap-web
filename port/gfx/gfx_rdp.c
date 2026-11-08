@@ -599,6 +599,7 @@ static Prog *cur_prog;
 #define PF_TEXEDGE 128u
 #define PF_FORCE_BL 256u
 #define PF_RECT 512u           /* no shade (rectangles): SHADE = 0 */
+#define PF_3POINT 1024u        /* G_TF_BILERP: the RDP's 3-point filter in the shader (textures sampled NEAREST) */
 
 static const char *rgb_a[16] = {"comb.rgb", "t0.rgb", "t1.rgb", "uPrim.rgb", "sh.rgb", "uEnv.rgb", "vec3(1.0)", "vec3(noise)",
                                 "vec3(0.0)", "vec3(0.0)", "vec3(0.0)", "vec3(0.0)", "vec3(0.0)", "vec3(0.0)", "vec3(0.0)", "vec3(0.0)"};
@@ -629,10 +630,21 @@ static char *gen_frag(uint32_t w0, uint32_t w1, uint32_t oml, uint32_t flags) {
     int n = 0, cyc = flags & PF_CYC_MASK;
 #define P(...) n += snprintf(src + n, sizeof src - n, __VA_ARGS__)
     P("#version 300 es\nprecision highp float;\nin vec4 vCol;\nin vec4 vUV;\nout vec4 oCol;\n"
-      "uniform vec4 uPrim, uEnv, uFog, uBlend, uFill, uMisc;\nuniform sampler2D uT0, uT1;\n"
-      "void main() {\n vec4 sh = %s;\n", (flags & PF_RECT) ? "vec4(0.0)" : "vCol");
-    P(" vec4 t0 = %s;\n vec4 t1 = %s;\n", (flags & PF_TEX0) ? "texture(uT0, vUV.xy)" : "vec4(0.0)",
-      (flags & PF_TEX1) ? "texture(uT1, vUV.zw)" : "vec4(0.0)");
+      "uniform vec4 uPrim, uEnv, uFog, uBlend, uFill, uMisc;\nuniform sampler2D uT0, uT1;\n");
+    /* R2: G_TF_BILERP is the RDP's 3-point filter, not GL's 4-texel bilinear. With fs, ft the fractions between the
+     * four nearest texel centres: fs + ft < 1 -> T00 + fs (T10 - T00) + ft (T01 - T00), else
+     * T11 + (1 - fs) (T01 - T11) + (1 - ft) (T10 - T11): the triangle of the three nearest texels (N64 programming
+     * manual, texture filtering). The texture is sampled NEAREST at texel centres, so GL's wrap / mirror / clamp apply
+     * to each of the three texels as the tile's do on the RDP. Texel centres stay where GL bilinear had them. */
+    if (flags & PF_3POINT)
+        P("vec4 tex3(sampler2D s, vec2 uv) {\n vec2 sz = vec2(textureSize(s, 0)), d = 1.0 / sz, x = uv * sz - 0.5,"
+          " i = floor(x), f = x - i, c = (i + 0.5) * d;\n float k = step(1.0, f.x + f.y);\n vec2 g = mix(f, 1.0 - f, k);\n"
+          " vec4 tb = texture(s, c + k * d), t10 = texture(s, c + vec2(d.x, 0.0)), t01 = texture(s, c + vec2(0.0, d.y));\n"
+          " return tb + g.x * (mix(t10, t01, k) - tb) + g.y * (mix(t01, t10, k) - tb);\n}\n");
+    P("void main() {\n vec4 sh = %s;\n", (flags & PF_RECT) ? "vec4(0.0)" : "vCol");
+    const char *smp = (flags & PF_3POINT) ? "tex3" : "texture";
+    if (flags & PF_TEX0) P(" vec4 t0 = %s(uT0, vUV.xy);\n", smp); else P(" vec4 t0 = vec4(0.0);\n");
+    if (flags & PF_TEX1) P(" vec4 t1 = %s(uT1, vUV.zw);\n", smp); else P(" vec4 t1 = vec4(0.0);\n");
     P(" float noise = fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453);\n vec4 comb = vec4(0.0);\n");
     if (cyc == CYC_FILL) P(" oCol = uFill;\n}\n");
     else if (cyc == CYC_COPY) {
@@ -1122,6 +1134,7 @@ static int begin_batch(int kind, int tile) {
         if (zs_prim && ztest) flags |= PF_ZS_PRIM;
         if (kind != 0) flags |= PF_RECT;
         if ((om_l & OML_CVG_X_ALPHA) && (om_l & OML_ALPHA_CVG_SEL) && !(om_l & OML_FORCE_BL)) flags |= PF_TEXEDGE;
+        if (((om_h >> OMH_TEXTFILT_SFT) & 3) == 2 && (flags & (PF_TEX0 | PF_TEX1))) flags |= PF_3POINT;   /* G_TF_BILERP */
     }
     flags |= (om_l & OML_ALPHACOMPARE_MASK) << PF_ACMP_SFT;
     Prog *p = prog_get(w0, w1, oml, flags);
@@ -1162,7 +1175,9 @@ static int begin_batch(int kind, int tile) {
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, wt);
         }
         unsigned filt = (om_h >> OMH_TEXTFILT_SFT) & 3;
-        GLint f = (cyc == CYC_COPY || filt == 0) ? GL_NEAREST : GL_LINEAR;
+        /* G_TF_POINT and COPY: nearest; G_TF_BILERP: the nearest texels, filtered by the shader (PF_3POINT);
+         * G_TF_AVERAGE (not used by the game, R2 census): GL bilinear */
+        GLint f = (cyc == CYC_COPY || filt == 0 || (flags & PF_3POINT)) ? GL_NEAREST : GL_LINEAR;
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, f);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, f);
         cur_tex_w[u] = (float)w; cur_tex_h[u] = (float)h;

@@ -463,6 +463,10 @@ static void tex2(void) {
         vbe_st16(rd(TEX_PHYS + 0x2800 + (uint32_t)i * 2), rgba16(255, 0, 0, 1));
         vbe_st16(rd(TEX_PHYS + 0x2A00 + (uint32_t)i * 2), rgba16(0, 0, 255, 1));
     }
+    for (int x = 0; x < 4; x++) {   /* RGBA16 4x2 (3-point filter): row 0 W B B B, row 1 B W W W */
+        vbe_st16(rd(TEX_PHYS + 0x2C00 + (uint32_t)x * 2), x == 0 ? 0xFFFF : rgba16(0, 0, 0, 1));
+        vbe_st16(rd(TEX_PHYS + 0x2C08 + (uint32_t)x * 2), x == 0 ? rgba16(0, 0, 0, 1) : 0xFFFF);
+    }
 }
 static void fillrect(Gfx **pg, uint16_t c, int x0, int y0, int x1, int y1) {
     Gfx *g = *pg;
@@ -614,6 +618,17 @@ unsigned char *gfx_test_run2(void) {
     gSPClearGeometryMode(g++, G_ZBUFFER);
     gDPPipeSync(g++);
     gDPSetRenderMode(g++, G_RM_OPA_SURF, G_RM_OPA_SURF2);
+    /* R2 (G_TF_BILERP = the RDP's 3-point filter): the 4x2 texture (white texels (0,0) and (1,1), black (1,0) and
+     * (0,1)) magnified 16x (dsdx 1/16) at (250, 50). Pixel (15, 15) of the rectangle lies at fs = ft = 15.5 / 16 - 0.5 =
+     * 0.46875 from texel (0, 0): fs + ft < 1, so the RDP takes T00 + fs (T10 - T00) + ft (T01 - T00) = 1 - 0.9375 -> 16
+     * of 255; a 4-texel bilinear gives (1 - fs)(1 - ft) + fs ft = 0.50 -> 128. Pixel (16, 16) (fs = ft = 0.53125, the
+     * T11 triangle): 16 again */
+    gDPSetCombineMode(g++, G_CC_DECALRGBA, G_CC_DECALRGBA);
+    gDPSetTextureFilter(g++, G_TF_BILERP);
+    gDPLoadTextureBlock(g++, 0x06002C00, G_IM_FMT_RGBA, G_IM_SIZ_16b, 4, 2, 0, G_TX_CLAMP, G_TX_CLAMP, G_TX_NOMASK, G_TX_NOMASK, G_TX_NOLOD, G_TX_NOLOD);
+    texrect_1cyc(&g, 250, 50, 32, 32, 1 << 6);
+    gDPPipeSync(g++);
+    gDPSetTextureFilter(g++, G_TF_POINT);
     /* branch: a called list branches to another, whose end returns to this one */
     {
         Gfx *b = branch2;
@@ -667,6 +682,13 @@ unsigned char *gfx_test_run2(void) {
         uint16_t far = fb_px(FB2_PHYS, 320, 190, 215), nearer = fb_px(FB2_PHYS, 320, 215, 215);
         check("prim_depth_units", far == rgba16(0, 0, 255, 1) && nearer == rgba16(255, 255, 0, 1),
               "screen z 997 over the quad at 996: %04X (blue: hidden), 995: %04X (yellow)", far, nearer);
+    }
+    {
+        uint16_t q0 = fb_px(FB2_PHYS, 320, 250 + 15, 50 + 15), q1 = fb_px(FB2_PHYS, 320, 250 + 16, 50 + 16);
+        uint16_t c0 = fb_px(FB2_PHYS, 320, 250 + 2, 50 + 2), c1 = fb_px(FB2_PHYS, 320, 250 + 29, 50 + 29);
+        int r0 = q0 >> 11, r1 = q1 >> 11;
+        check("three_point_filter", r0 <= 4 && r1 <= 4 && c0 == 0xFFFF && c1 == 0xFFFF,
+              "between the diagonal texels: red %d, %d of 31 (3-point 2; 4-texel bilinear 16); corners %04X %04X (white)", r0, r1, c0, c1);
     }
     uint16_t y = fb_px(FB2_PHYS, 320, 255, 155), cy = fb_px(FB2_PHYS, 320, 285, 155), bg = fb_px(FB2_PHYS, 320, 5, 230);
     check("branch_list", y == rgba16(255, 255, 0, 1) && cy == rgba16(0, 255, 255, 1) && bg == rgba16(40, 40, 40, 1), "%04X %04X %04X", y, cy, bg);
