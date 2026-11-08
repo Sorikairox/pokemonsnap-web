@@ -21,8 +21,8 @@ void port_gfx_log_stats(void) {
     for (unsigned i = 0; i < sizeof s / sizeof(unsigned); i++) o[i] = a[i] - b[i];
     last = s;
     port_log("[gfxstat] tasks %u cmds %u tris %u lines %u rects %u fills %u draws %u verts %u culled %u tex %u/%u hits; "
-             "resolves %u (%u px) uploads %u (%u px) z resolves %u (%u px) z uploads %u z clears %u ucode %u; unknown %u "
+             "resolves %u (%u px) uploads %u (%u px) z resolves %u (%u px) z uploads %u z clears %u clipped %u ucode %u; unknown %u "
              "bad addr %u; presents %u\n",
              d.tasks, d.cmds, d.tris, d.lines, d.rects, d.fills, d.draws, d.verts, d.culled, d.tex_decodes, d.tex_hits,
-             d.resolves, d.resolve_px, d.uploads, d.upload_px, d.zresolves, d.zresolve_px, d.zuploads, d.zclears, d.ucode_loads, d.unknown_ops, d.bad_addr, d.presents);
+             d.resolves, d.resolve_px, d.uploads, d.upload_px, d.zresolves, d.zresolve_px, d.zuploads, d.zclears, d.clipped, d.ucode_loads, d.unknown_ops, d.bad_addr, d.presents);
 }

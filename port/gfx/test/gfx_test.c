@@ -546,6 +546,23 @@ unsigned char *gfx_test_run2(void) {
     vset(gv, 0, 10, 150, 0, 0, 0, 0x00FF00FF); vset(gv, 1, 10, 190, 0, 0, 0, 0x00FF00FF); vset(gv, 2, 50, 190, 0, 0, 0, 0x00FF00FF);
     gSPVertex(g++, gv, 3, 0);
     gSP1Triangle(g++, 0, 1, 2, 0);
+    /* R1 (Beach sky box): a vertex on the eye plane (w = 0, z < -w). Projection: clip = (x / 160, -y / 120, z - 1, z),
+     * no Z. A = (100, 0, 0) is the point at infinity to the right, B, C at w = 1 project to (230, 100) and (230, 140): the
+     * triangle is the strip x >= 230, 100 <= y <= 140. Shade: A white, B, C black. Projective interpolation at pixel
+     * (x, 120): n = (x + 0.5 - 160) / 160, lambda_A = (n - 0.4375) / 0.625 per unit of w, a = lambda_A / (lambda_A + 1):
+     * 24 at x = 240, 105 at x = 300 (out of 255) */
+    gDPPipeSync(g++);
+    gDPSetCombineMode(g++, G_CC_SHADE, G_CC_SHADE);
+    gSPClearGeometryMode(g++, G_CULL_BACK | G_CULL_FRONT | G_ZBUFFER);
+    ident(m);
+    m[0][0] = 1 / 160.0f; m[1][1] = -1 / 120.0f; m[2][2] = 1; m[3][2] = -1; m[2][3] = 1; m[3][3] = 0;
+    gSPMatrix(g++, mtx(m), G_MTX_PROJECTION | G_MTX_LOAD | G_MTX_NOPUSH);
+    ident(m);
+    gSPMatrix(g++, mtx(m), G_MTX_MODELVIEW | G_MTX_LOAD | G_MTX_NOPUSH);
+    uint32_t *ev = vtx(3);
+    vset(ev, 0, 100, 0, 0, 0, 0, 0xFFFFFFFF); vset(ev, 1, 70, -20, 1, 0, 0, 0x000000FF); vset(ev, 2, 70, 20, 1, 0, 0, 0x000000FF);
+    gSPVertex(g++, ev, 3, 0);
+    gSP1Triangle(g++, 0, 1, 2, 0);
     /* branch: a called list branches to another, whose end returns to this one */
     {
         Gfx *b = branch2;
@@ -587,6 +604,12 @@ unsigned char *gfx_test_run2(void) {
     uint16_t a = fb_px(FB2_PHYS, 320, 15, 185), b = fb_px(FB2_PHYS, 320, 115, 185), c = fb_px(FB2_PHYS, 320, 175, 185), d = fb_px(FB2_PHYS, 320, 65, 185);
     check("matrix_stack", a == 0xFFFF && b == 0xFFFF && d == rgba16(40, 40, 40, 1), "orig %04X pushed %04X between %04X", a, b, d);
     check("mw_matrix_patch", c == rgba16(0, 255, 0, 1), "%04X (green at +160)", c);
+    {
+        uint16_t e1 = fb_px(FB2_PHYS, 320, 240, 120), e2 = fb_px(FB2_PHYS, 320, 300, 120), e3 = fb_px(FB2_PHYS, 320, 300, 95);
+        int g1 = (e1 >> 6) & 31, g2 = (e2 >> 6) & 31;
+        check("eye_plane_vertex", g1 >= 1 && g1 <= 5 && g2 >= 11 && g2 <= 15 && e3 == rgba16(40, 40, 40, 1),
+              "x 240: %04X (green %d, 3 expected), x 300: %04X (green %d, 13 expected), above the strip %04X", e1, g1, e2, g2, e3);
+    }
     uint16_t y = fb_px(FB2_PHYS, 320, 255, 155), cy = fb_px(FB2_PHYS, 320, 285, 155), bg = fb_px(FB2_PHYS, 320, 5, 230);
     check("branch_list", y == rgba16(255, 255, 0, 1) && cy == rgba16(0, 255, 255, 1) && bg == rgba16(40, 40, 40, 1), "%04X %04X %04X", y, cy, bg);
     port_gfx_vi_frame(rd(FB2_PHYS), 320);

@@ -1244,10 +1244,69 @@ static void probe_rect(float x0, float y0, float x1, float y1, float s, float t,
     }
 }
 
+/* A triangle with a vertex on or behind the eye plane (w <= 0) or in front of the near plane (z < -w), handed to GL
+ * as is, is clipped by GL at the near plane: the new vertices have a tiny w, project tens of thousands of pixels off
+ * screen and, at least on SwiftShader, the attributes inside come out wrong (R1: Beach sky box, retrace 3801: the
+ * background mesh has vertices at w = 0 exactly; the strips next to them took one texel and one shade, the "lighter
+ * rectangles" in the top corners, where the projective interpolation varies t from 29 to 6).
+ * The game's microcode (F3DEX2_NoN, gtl.c) clips against the four side planes only (the game sets a clip ratio of 1:
+ * gSPClipRatio(FRUSTRATIO_1), G_MW_CLIP words 1 / -1), never at the near plane. Do the same here for those triangles:
+ * clip against the side planes of the colour image (Sutherland-Hodgman in homogeneous space, attributes interpolated
+ * linearly in the clip parameter like the RSP's clipper), then hand GL a fan whose vertices all have w > 0 and lie on
+ * the image. Depth is left as computed (GL still removes what is nearer than the near plane; the console would draw
+ * it with a clamped Z: not emulated). Returns 1 when the triangle was handled here. */
+static int clip_tri_sides(const GfxVtx *v[3]) {
+    int need = 0;
+    for (int i = 0; i < 3; i++) need |= !(v[i]->w > 0) || v[i]->z < -v[i]->w;
+    if (!need) return 0;
+    enum { NF = sizeof(GfxVtx) / sizeof(float) };
+    float W = (float)cur_target->width, H = (float)cur_target->height;
+    float poly[2][9][NF];
+    int n = 3, cur = 0;
+    for (int i = 0; i < 3; i++) memcpy(poly[0][i], v[i], sizeof(GfxVtx));
+    for (int plane = 0; plane < 4 && n > 0; plane++) {
+        float (*in)[NF] = poly[cur], (*out)[NF] = poly[cur ^ 1];
+        int m = 0;
+        for (int i = 0; i < n; i++) {
+            const float *p = in[i], *q = in[(i + 1) % n];
+            /* distance to the plane: >= 0 inside. x, y are N64 pixels * w: 0 <= x <= W w, 0 <= y <= H w */
+            float dp, dq;
+            switch (plane) {
+            case 0: dp = p[0]; dq = q[0]; break;                       /* x >= 0 */
+            case 1: dp = W * p[3] - p[0]; dq = W * q[3] - q[0]; break; /* x <= W w */
+            case 2: dp = p[1]; dq = q[1]; break;                       /* y >= 0 */
+            default: dp = H * p[3] - p[1]; dq = H * q[3] - q[1]; break;
+            }
+            if (dp >= 0 && m < 9) memcpy(out[m++], p, sizeof(GfxVtx));
+            if ((dp >= 0) != (dq >= 0) && m < 9) {
+                float t = dp / (dp - dq);
+                for (int k = 0; k < NF; k++) out[m][k] = p[k] + (q[k] - p[k]) * t;
+                m++;
+            }
+        }
+        n = m;
+        cur ^= 1;
+    }
+    if (n < 3) return 1;
+    float (*pv)[NF] = poly[cur];
+    for (int i = 0; i < n; i++) if (!(pv[i][3] > 0)) return 1;   /* only the eye point itself is left: nothing to draw */
+    if (batch_n + 3 * (n - 2) > MAX_BATCH_VERTS) flush();
+    float y0 = 1e9f, y1 = -1e9f;
+    for (int i = 1; i + 1 < n; i++) {
+        const float *f[3] = {pv[0], pv[i], pv[i + 1]};
+        for (int k = 0; k < 3; k++) put_vtx(f[k][0], f[k][1], f[k][2], f[k][3], &f[k][4], f[k][8], f[k][9]);
+    }
+    for (int i = 0; i < n; i++) { float y = pv[i][1] / pv[i][3]; y0 = fminf(y0, y); y1 = fmaxf(y1, y); }
+    mark_rows(y0, y1);
+    port_gfx_stats.clipped++;
+    return 1;
+}
+
 void rdp_tri(const GfxVtx *a, const GfxVtx *b, const GfxVtx *c) {
     if (!begin_batch(0, 0)) return;
     { const GfxVtx *pv[3] = {a, b, c}; probe_tri(pv); }
     const GfxVtx *v[3] = {a, b, c};
+    if (clip_tri_sides(v)) return;
     for (int i = 0; i < 3; i++) put_vtx(v[i]->x, v[i]->y, v[i]->z, v[i]->w, &v[i]->r, v[i]->s, v[i]->t);
     if (a->w > 0 && b->w > 0 && c->w > 0) {
         float ya = a->y / a->w, yb = b->y / b->w, yc = c->y / c->w;
