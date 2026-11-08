@@ -205,9 +205,9 @@ console address for logs. Remove such logs before committing.
   Paks; their calls answer "no pak"), ports 2-4 CONT_NO_RESPONSE_ERROR. `osContStartQuery` / `osContStartReadData`
   post the SI event; `osContGetReadData` writes the host pad (`port_set_pad(i, buttons, x, y)`, exported, OSContPad
   bits). Node: `--tap N MASK` presses MASK for 3 retraces every N retraces (frame-indexed, deterministic).
-- FlashRAM: 131072-byte image (console byte order, erased 0xFF), 128-byte pages, 16 KiB sector erase, programming
-  ANDs bits; `osFlashReadId` = Macronix MX_C. `port_flash_image()` / `port_flash_generation()` exported for the host
-  (persistence: S8).
+- FlashRAM (S8, docs/port/SAVE.md): the game's own driver `src/os/osFlash.c` is compiled; the chip (Macronix MX_C,
+  131072-byte image in console byte order, erased 0xFF) is modelled behind `osEPiWriteIo` / `osEPiReadIo` / the PI
+  DMA of the flash handle in `port/save/flashram.c`; host interface and generation counter in `port/save/save.c`.
 - `osVirtualToPhysical`: mirror pointer -> console physical address (0..8 MiB); KSEG0 -> physical; any other
   pointer (C object) unchanged.
 - Caches (S3c): `osInvalDCache(p, n)` -> `port_gfx_inval_dcache` (GPU-drawn colour images in range are written into
