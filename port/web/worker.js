@@ -15,6 +15,7 @@
 //               does) and POST it to /audio at the end: the harness writes OUT/audio.wav
 //   cfg.play    (S7) also send each drained block to the page, which plays it (Web Audio; off by default, and
 //               headless Chrome runs muted)
+//   cfg.options (F1) [[id, value], ...]: port_option_set before main (the retrowser host's rtw_option)
 //   cfg.save    (S8) boot with the FlashRAM image the harness serves at /save; after every retrace that changed the
 //               flash the image is POSTed to /save?gen=N (the harness keeps it as OUT/flash.fla)
 // The ROM is fetched from /rom, which the harness serves from the player's own file (never from the repo).
@@ -59,6 +60,7 @@ onmessage = async (e) => {
       const q = M._port_flash_image() >>> 0;
       await fetch(`/save?gen=${M._port_flash_generation() >>> 0}`, { method: 'POST', body: M.HEAPU8.slice(q, q + M._rtw_save_size()) });
     };
+    for (const [id, v] of cfg.options || []) M._port_option_set(id, v);   // F1: as rtw_option at start
     if (cfg.readback) M._port_rb_record(1);
     const rc = M.callMain(cfg.args || []);
     print(`[web] main returned ${rc}; ${cfg.frames} retraces, pace ${cfg.pace}`);

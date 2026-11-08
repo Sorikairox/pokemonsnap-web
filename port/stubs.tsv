@@ -4,9 +4,9 @@ libc	acosf	emscripten libc (host byte order: check before use on game memory)	po
 libc	atoi	emscripten libc (host byte order: check before use on game memory)	port/boot/main
 libc	fmaxf	emscripten libc (host byte order: check before use on game memory)	port/gfx/gfx_rdp
 libc	fminf	emscripten libc (host byte order: check before use on game memory)	port/gfx/gfx_rdp
-libc	free	emscripten libc (host byte order: check before use on game memory)	port/gfx/gfx_rdp (+1)
+libc	free	emscripten libc (host byte order: check before use on game memory)	port/gfx/gfx_rdp (+2)
 libc	lrintf	emscripten libc (host byte order: check before use on game memory)	port/gfx/gfx_rsp
-libc	malloc	emscripten libc (host byte order: check before use on game memory)	port/gfx/gfx_rdp (+1)
+libc	malloc	emscripten libc (host byte order: check before use on game memory)	port/gfx/gfx_rdp (+2)
 libc	qsort	emscripten libc (host byte order: check before use on game memory)	port/ultra/pc_icall
 libc	realloc	emscripten libc (host byte order: check before use on game memory)	port/audio/audio_ai (+1)
 libc	snprintf	emscripten libc (host byte order: check before use on game memory)	port/gfx/gfx_rdp

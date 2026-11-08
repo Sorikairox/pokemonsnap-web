@@ -28,6 +28,7 @@
 extern int rtw_log(const char *p, int len);
 extern int rtw_build_id(unsigned char *p);
 extern int rtw_rumble(int port, int on);
+extern int rtw_option_changed(int id, int value);
 /* glue (library_rtw.js / rtw_glue.js) */
 extern void port_rtw_host_frame(void);
 extern void port_rtw_set_paused(int on);
@@ -203,7 +204,8 @@ static int stick(int v) {
 
 EMSCRIPTEN_KEEPALIVE int rtw_input(int port, int buttons, int sx, int sy) {
     if (port != 0) return 0; /* one controller */
-    int b = buttons & 0xFFFF, x = stick(sx), y = stick(sy);
+    /* bits 16-31: controls.extra (bit 16 "Snap", F1): port_set_pad -> port_pad_filter (pc_options.c) */
+    int b = buttons & 0x1FFFF, x = stick(sx), y = stick(sy);
     if ((b != pad_buttons || x != pad_x || y != pad_y) && pad_logged < 200) {
         pad_logged++;
         logf_("rtw: pad0 buttons %04x stick %d,%d (retrace %u)", b, x, y, port_vi_count);
@@ -213,6 +215,18 @@ EMSCRIPTEN_KEEPALIVE int rtw_input(int port, int buttons, int sx, int sy) {
     pad_y = y;
     if (started) port_rtw_host_frame(); /* the frame clock: rtw_glue.js decides, the retrace runs after this returns */
     return 0;
+}
+
+/* options (standard 4.7, F1): every option of retrowser.json is "inGame" (the game's Options menu shows it); the host
+ * calls rtw_option for each at start-up with the value it remembers and is told of every change from the menu */
+int port_option_set(int id, int value);
+EMSCRIPTEN_KEEPALIVE int rtw_option(int id, int value) {
+    logf_("rtw: option %d = %d from the host", id, value);
+    return port_option_set(id, value);
+}
+void port_option_changed(int id, int value) { /* pc_options.c (weak there): the game's Options menu changed it */
+    logf_("rtw: option %d = %d changed in the game's Options menu", id, value);
+    rtw_option_changed(id, value);
 }
 
 EMSCRIPTEN_KEEPALIVE int rtw_pause(int on) {

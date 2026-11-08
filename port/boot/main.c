@@ -114,6 +114,11 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--tap") && i + 2 < argc) { /* --tap N MASK: press MASK for 3 retraces every N */
             tap_every = atoi(argv[++i]);
             tap_mask = (int)strtol(argv[++i], NULL, 0);
+        } else if (!strcmp(argv[i], "--option") && i + 1 < argc) { /* --option ID=VALUE: a port option (F1) */
+            int port_option_set(int id, int value);
+            char *p = argv[++i];
+            int id = (int)strtol(p, &p, 0);
+            port_option_set(id, *p == '=' ? (int)strtol(p + 1, NULL, 0) : 1);
         } else if (!strcmp(argv[i], "--tap-end") && i + 1 < argc) { /* --tap-end F: no taps from retrace F on (S6) */
             tap_end = atoi(argv[++i]);
         } else if (!strcmp(argv[i], "--threads") && i + 1 < argc && n_tdump < 8) { /* thread dump after retrace F */

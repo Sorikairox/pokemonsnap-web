@@ -43,7 +43,9 @@ Needs `./pokemonsnap.z64` (`port/docker/run.sh rom PATH`) and the local retrowse
 | `hz` | 60 | NTSC; informative (self-running) |
 | `save` | `flash`, 131072 | the cartridge's FlashRAM, console byte order (SAVE.md) |
 | `license`, `source` | `MIT`, github.com/Sorikairox/pokemonsnap-web | public repo |
-| no `options`, `controls.extra`, `net`, `picture`, `icon` | | nothing needs them yet |
+| `controls.extra` | bit 16 "Snap" | F1: the Snap button (FEATURES.md) |
+| `options` | id 1 "Snap button", bool, default 1, `inGame` | F1: shown in the game's Options menu, kept by the host |
+| no `net`, `picture`, `icon` | | nothing needs them yet |
 
 ## Build (`port_build.py --rtw`, `link_rtw`)
 
@@ -81,7 +83,9 @@ Shared-code hooks (weak defaults keep the harness as it was): `port_vbe_fix_defe
   inside a host call, so the host only ever sees complete images.
 - **Rumble**: `__osMotorAccess` -> `port_rumble` -> `rtw_rumble(channel, on)`. Not reached: the port reports no pak,
   and the game never starts the motor (`contRumbleStart` has no caller; only `scPreNMIDefault` sends init + stop).
-- **Imports**: `rtw_log`, `rtw_build_id`, `rtw_rumble`. Not used yet: `rtw_export_file` (album photos as PNG would
+- **Options** (F1): export `rtw_option(id, value)` -> `port_option_set` (pc_options.c); import `rtw_option_changed`
+  called when the game's Options menu changes one. `rtw_input` passes bit 16 (Snap) to `port_set_pad`.
+- **Imports**: `rtw_log`, `rtw_build_id`, `rtw_rumble`, `rtw_option_changed`. Not used yet: `rtw_export_file` (album photos as PNG would
   be a feature behind an option).
 - Test hooks: `Module.rtwManual` (no pacing; `node_host.mjs` steps `_port_rtw_retrace` itself), `port_rtw_test_log`.
 

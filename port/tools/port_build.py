@@ -542,7 +542,8 @@ def main():
         '_port_rb_journal_size,_port_rb_load,_port_rb_point_count,'
         '_rtw_audio_rate,_rtw_audio_drain,_rtw_audio_buffer,_port_audio_capture,_port_audio_capture_ptr,'   # S7: audio
         '_port_audio_capture_frames,_port_audio_pcm_hash,'
-        '_port_save_load,_port_save_poll,_rtw_save_ptr,_rtw_save_size,_rtw_save_generation',   # S8: save
+        '_port_save_load,_port_save_poll,_rtw_save_ptr,_rtw_save_size,_rtw_save_generation,'   # S8: save
+        '_port_option_set,_port_option_get',   # F1: port options (run.mjs --option)
         '-sEXPORTED_RUNTIME_METHODS=HEAPU8,HEAP32,callMain', '--profiling-funcs',
         '--js-library', 'port/gfx/gfx_gl.js', '-sMAX_WEBGL_VERSION=2', '-sMIN_WEBGL_VERSION=2',   # S3c: renderer
         '-Wl,--error-limit=0', f'-Wl,-Map={OUT}/pokemonsnap.map']
@@ -564,7 +565,7 @@ RTW = f'{OUT}/rtw/link'   # the linked module; port/rtw/build.sh makes the shipp
 # defines (plus port_rtw_retrace for the loop driver); host imports through port/rtw/library_rtw.js.
 RTW_EXPORTS = ['rtw_rom_buffer', 'rtw_start', 'rtw_input', 'rtw_pause', 'rtw_resize', 'rtw_save_ptr', 'rtw_save_size',
                'rtw_save_generation', 'rtw_save_load', 'rtw_audio_rate', 'rtw_audio_drain', 'rtw_audio_buffer',
-               'port_rtw_retrace', 'port_rtw_test_log']
+               'rtw_option', 'port_rtw_retrace', 'port_rtw_test_log']
 
 
 def link_rtw(link, js):

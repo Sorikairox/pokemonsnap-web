@@ -13,6 +13,8 @@
   "video": "webgl",
   "hz": 60,
   "save": { "kind": "flash", "size": 131072 },
+  "controls": { "extra": [{ "bit": 16, "label": "Snap" }] },
+  "options": [{ "id": 1, "label": "Snap button", "type": "bool", "default": 1, "inGame": true }],
   "license": "MIT",
   "source": "https://github.com/Sorikairox/pokemonsnap-web"
 }
