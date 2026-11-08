@@ -4799,7 +4799,6 @@ UILayout_HideButtons	80370A48	8441F8	1EC	func	global	.window	window	build/src/wi
 koffing_part12_draw_near	80325C48	6A80F8	E0	data	global	.cave_code	cave_code	build/src/cave/koffing/model.c.o
 D_801178E0_A92C90.NON_MATCHING	801178E0	A92C90	1	data	global	.menu_new_game	menu_new_game	build/asm/data/menu_new_game/sprite_card.data.s.o
 dugtrio_modelanim_unburrow	80167220	1AD380	3C	data	global	.tunnel_assets	tunnel_assets	build/src/tunnel/dugtrio/anim/model/unburrow.c.o
-func_80364360_504770	80364360	504770	68	func	global	.app_level	app_level	build/src/app_level/504770.c.o
 D_802D3554_7ACAE4	802D3554	-	0	data	global	abs	-	-
 UIElement_SetColor	8036B870	83F020	118	func	global	.window	window	build/src/window/element.c.o
 func_802E0C98_6C8A78	802E0C98	6C8A78	AC	func	global	.river_code	river_code	build/src/river/6C86E0.c.o
@@ -4864,6 +4863,7 @@ D_802C6F14_6493C4	802C6F14	-	0	data	global	abs	-	-
 PokemonDetector_Photo	803AE788	-	7A8	data	global	.app_level_bss	app_level	build/src/app_level/pokemon_detect.c.o
 album_CreateCommentTextBox	801DE830	9A8A80	168	func	global	.pokemon_album	pokemon_album	build/src/pokemon_album/9A6F70.c.o
 D_802ECA10_7C5FA0	802ECA10	-	0	data	global	abs	-	-
+app_level_CheckIllegalCopy	80364360	504770	68	func	global	.app_level	app_level	build/src/app_level/504770.c.o
 mew_tex_8012C3B0_png	8012C3B0	-	0	data	global	abs	-	-
 beach_assets_ROM_END	13C780	-	0	none	global	abs	-	-
 D_A4040000	A4040000	-	0	none	global	abs	-	-

@@ -89,7 +89,7 @@ static void fiber_bench(int n) {
 }
 
 int main(int argc, char **argv) {
-    int frames = 0, bench = 0;
+    int frames = 0, bench = 0, tap_every = 0, tap_mask = 0;
     port_log("[boot] Pokemon Snap wasm port (S3a); RDRAM mirror at %p\n", (void *)n64_rdram);
     if (!port_rom_ready()) {
         port_log("[boot] no ROM: call port_set_rom(ptr, size) before main\n");
@@ -99,6 +99,10 @@ int main(int argc, char **argv) {
         if (!strcmp(argv[i], "--load-all")) load_all_test();
         else if (!strcmp(argv[i], "--frames") && i + 1 < argc) frames = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--bench")) bench = 1;
+        else if (!strcmp(argv[i], "--tap") && i + 2 < argc) { /* --tap N MASK: press MASK for 3 retraces every N */
+            tap_every = atoi(argv[++i]);
+            tap_mask = (int)strtol(argv[++i], NULL, 0);
+        }
     }
     port_mem_init();
     if (port_load_segment("main")) return 1;
@@ -111,7 +115,9 @@ int main(int argc, char **argv) {
     extern unsigned port_ovl_resets, port_cont_reads;
     double t0 = emscripten_get_now(), tlast = t0;
     unsigned swaps_last = 0;
+    void port_set_pad(int i, int buttons, int x, int y);
     for (int f = 1; f <= frames; f++) {
+        if (tap_every > 0) port_set_pad(0, f % tap_every < 3 ? tap_mask : 0, 0, 0); /* scripted input (frame-indexed) */
         port_vi_retrace();
         if (f % 60 == 0 || f == frames) {
             double t = emscripten_get_now();

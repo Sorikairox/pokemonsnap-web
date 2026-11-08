@@ -30,15 +30,24 @@ The build is deterministic (two clean builds give the same wasm SHA-1) and takes
   overlays sharing VRAM simply share addresses).
 - Absolute link symbols (not in RAM: `*_ROM_START`, `*_SIZE`, `D_0E000000` segment addresses, ...; 784) are replaced
   in the IR by `inttoptr` constants (vbe.py `abs_syms`, table `port/build/abs_syms.txt`).
-- C-defined data (code TUs, game-data TUs, libultra C) lives in wasm, not in the mirror. Open point for S3: when the
-  game DMAs an overlay again, its C data and bss in wasm are not re-initialised (the mirror copy is).
+- C-defined data (code TUs, game-data TUs, libultra C) lives in wasm, not in the mirror. Overlay TUs' writable
+  globals sit in per-overlay wasm sections and are reset when the overlay is loaded again (S3a, "Overlays" below).
+- **Console addresses as pointers (S3a, vbe.py `k0_ptrs`)**: game C hard-codes KSEG0 addresses and the unmapped /
+  compressed data holds them as pointer words. In game code every integer -> pointer conversion and every pointer
+  loaded from memory (except plain locals and the TU's own C globals) maps 0x80000000..0x807FFFFF to the same offset
+  in `n64_rdram`; constant `inttoptr` of such an address becomes `n64_rdram + offset` (16 constants, 109 run-time
+  conversions, 10490 pointer loads). Arithmetic on a hard-coded address together with a symbol address needs the
+  source to say so: `PORT_K0(a)` (port_prefix.h), used by `VPK_VRAM` (include/constants.h). Not mapped: KSEG1
+  0xA0000000.. (a cheap test would also catch wasm addresses past 512 MiB), and tests like `(u32)p >= 0x80000000` on
+  pointers (none known in Snap yet; Conker had some).
 
 ## ROM loader and relocations
 
 - `port_set_rom(ptr, size)` (exported) takes .z64/.n64/.v64 and keeps one copy in the vbe layout (one bswap32 per
   word). `port_rom_copy(dst, rom, n)` copies into game memory at any alignment.
-- `port_load_segment(name)` (pc_mem.c): segment table `gen/pc_segments.c` from `segments.tsv`; copies the ROM range to
-  the mirror at the segment's VRAM, clears its bss, applies its relocations.
+- `port_load_segment(name)` (pc_mem.c; the boot loader of `main`, and `--load-all`): segment table
+  `gen/pc_segments.c` from `segments.tsv`; copies the ROM range to the mirror at the segment's VRAM, clears its bss,
+  then relocates through `port_dma_loaded` like any DMA (S3a, "DMA" below).
 - Relocations: `port/symbols/relocs.tsv` (gen_relocs.py, frozen from the matching build's objects: every R_MIPS_32
   in `.data`/`.rodata` of the objects the port does **not** compile; 33785 words, offsets and names only, addends stay
   in the ROM). gen_stubs.py resolves each against the link: target is a C object/function of the port -> its wasm
@@ -68,12 +77,103 @@ with balanced parentheses (the lazy regex truncated them); a site's own argument
 is unchanged; calls to a function the TU defines `static` are never rewritten (libaudio's `_getRate` / `_getVol`
 exist in two TUs with different signatures). Result: 41 rewritten sites, 12 functions with mismatching sites
 (`port/build/sig_mismatch.txt`), **0 short K&R calls** (`port/build/short_calls.tsv`).
-Not done yet: indirect calls (site-typed trampolines, Conker icall.py) -> S3.
 
-## Known gaps (S3)
+## Indirect calls (S3a: icall.py, icall_gen.py, pc_icall.c)
 
-- Bitfields (IDO MSB-first, clang LSB-first), not yet reversed under `#ifdef PORT`: `include/common_structs.h`
-  (photo data: `pokemonID:13, unk_00_13:6, specialID:5`; `levelID:7, unk_00_24:1, unk_00_16:8`),
-  `src/tunnel/tunnel.h`, `src/sys/sched.c` (VI feature flags), `src/photo_check/993F80.c`, `src/more_funcs/5BF20.c`.
-- Indirect-call trampolines; the address -> function table for function pointers computed at run time.
-- Overlay C data / bss re-initialisation on reload; KSEG0 pointer masks / `osVirtualToPhysical` users (audio).
+- **Site-typed trampolines** (adapted from Conker): every indirect call in a game TU (184 sites) calls
+  `__icall.<hash>(fp, args...)` with the site's own type. Fast path: the target's registered wasm signature equals the
+  site's (or is unknown: PC-layer functions are not registered) -> plain `call_indirect`. Slow path:
+  `__port_icall_slow` (generated, one noinline case per target signature, 109, in groups of 16) converts arguments and
+  result like sigs.py does for direct calls; mismatches are logged (`[icall] signature mismatch`), void targets
+  called for a value too (they read 0 here, v0 on the N64: audit each). Each TU's constructor registers its
+  functions' signatures (`__port_fsig_reg`, 4133 functions).
+- **Address -> function table**: each TU also registers {function, console address, segment index} from
+  `port/symbols/symbols.tsv` (4085 functions; port_build.py writes `port/build/fvram/<tag>.txt`). A trampoline whose
+  pointer is >= 1 MiB (not a table index: a console KSEG0 address, or a mirror address after the K0 mapping) calls
+  `__port_fptr_fix`, which returns the function at that console address **in the overlay resident there** (pc_mem.c
+  tracks the last segment loaded over each VRAM range; overlays share VRAM). Logged: `[icall] function pointer ...`.
+  Seen at boot: the scene setups and process tables in un-mapped `.data` (`assets/main_menu/A0F660.bin` = rom-bin:
+  no relocations) hold console function addresses: ~4 fix-ups per retrace on the menus. Their **identity** differs
+  from the C function's table index (a compare `p == func` would fail): give rom-bin data relocations (a scan for
+  function-start words, reviewed) or map those data at load time (open, S4).
+- PC-layer calls of game function pointers (thread entry points): `port_call_vi(fp, a0)` (same rules).
+
+## Threads (S3a: pc_os.c)
+
+- `OSThread` = an Emscripten fiber (ASYNCIFY) with **static, fixed-address stacks** (256 slots x 128 KiB C stack +
+  64 KiB Asyncify stack; slot tag in `OSThread.thprof`): their addresses end up in game memory, so they must not
+  depend on heap history. The console stack passed to `osCreateThread` is unused (the game's stack probes still
+  pass: nothing writes there).
+- libultra scheduling: highest priority first, FIFO among equals (by the time each became runnable), preemption as
+  soon as a higher-priority thread becomes runnable (`osSendMesg` waking a receiver, `osStartThread`,
+  `osSetThreadPri`), blocking in `osRecvMesg` / `osSendMesg(BLOCK)` / `osStopThread` / `osYieldThread`. Threads
+  switch to each other directly (one fiber swap); the host context runs only when nothing is runnable. Priority 0 is
+  never run (the idle thread lowers itself to 0 and spins `while (1)`). Threads whose entry returns are destroyed.
+- `OSThread.priority/id/state` (state via the vbe halfword) and the `tlnext` list (`__osGetActiveQueue`, error.c)
+  are kept in game memory; `OSMesgQueue` is fully the libultra one (validCount/first/msgCount/msg in game memory),
+  waiters are tracked on the PC side (`mtqueue`/`fullqueue` point at a `__osThreadTail`-like sentinel).
+- Events: `osSetEventMesg` table; `pc_post_event(e)` sends (NOBLOCK) from the PC layer.
+- Clock: deterministic: `osGetCount` = retraces x 781250 + 64 per read (never past the next retrace); `osGetTime` the
+  same 64-bit, `osSetTime` an offset. No wall time anywhere in game state.
+- Measured (node, S3a): fiber switch **~1.0-1.3 us** at shallow stacks (`--bench`: 40002 switches, two threads
+  ping-ponging); boot -> main menu -> Oak's lab: **peak 16 live threads** (49 created over 3600 retraces), 17-31
+  switches per retrace, 0.1-0.7 ms per retrace for the whole game with no renderer. Levels (one om thread per object
+  process, `omCreateProcess` kind 0) not reached yet: measure there (S5).
+
+## Retrace, SP, DP, AI (S3a: pc_rcp.c)
+
+- `port_vi_retrace()` (exported; node's main loops it): the next framebuffer becomes current, `port_vi_present(fb,
+  vi_mode, black)` (weak hook, renderer), the `osViSetEvent` message every `retraceCount` retraces, then the threads
+  run until idle. `osViSwapBuffer` / `osViGetCurrentFramebuffer` / `osViGetNextFramebuffer` as libultra.
+- `osSpTaskLoad` + `osSpTaskStartGo` (= `osSpTaskStart`): a graphics task (`M_GFXTASK`) runs `port_gfx_task(task)`
+  (weak hook; the renderer's strong definition replaces it) and posts SP done then DP full sync; an audio task
+  posts SP done (audio HLE: S7). Never yielded (`osSpTaskYielded` 0). `osDpSetNextBuffer` posts DP. Each graphics
+  task is walked (display-list census: opcode counts and an FNV hash, `[task]` lines; the first one's histogram
+  `[dlhist]`). `osAiSetFrequency` returns the real DAC rate; `osAiSetNextBuffer` accepts and drops (S7).
+- Display-list address forms seen (for the renderer): wasm addresses of C objects (matrices in bss, 0x1006xxxx),
+  mirror addresses (0x108xxxxx-0x10Fxxxxx: framebuffers, Z, heaps), **raw KSEG0 addresses** in DLs from un-mapped
+  data (`G_VTX 803717A8`, `G_SETTIMG 8035D2B0`: the renderer maps 0x80000000.. into the mirror), segmented addresses
+  (`G_SETCIMG 0F000000`; segment bases set by `G_MOVEWORD` are wasm/mirror addresses or 0), physical (< 8 MiB:
+  `osVirtualToPhysical` of mirror pointers). `OS_K0_TO_PHYSICAL(&gspF3DEX2_NoN_fifoTextStart)` leaves a mirror address
+  (0x1083E7A0): the mask 0x1FFFFFFF does not change wasm addresses below 512 MiB.
+
+## DMA, controllers, flash (S3a: pc_pi.c, pc_mem.c)
+
+- `osEPiStartDma`: OS_READ copies ROM bytes (`devAddr` = ROM offset, or PI 0x1xxxxxxx / KSEG1 0xBxxxxxxx forms)
+  into game memory at once, then posts the I/O message to `retQueue`; writes are logged and ignored.
+- **Relocation on DMA** (`port_dma_loaded`): a copy from a segment's ROM range to the same offset of its VRAM is a
+  load of that part of the segment: the pointer words in the copied range are relocated (relocs.tsv, sorted per
+  segment, binary search). This covers `dmaLoadOverlay`, `dmaReadRom` of whole asset segments (`46270.c`), and the
+  boot load of main, with no game edit.
+- Controllers: one standard pad in port 1, no pak (status 0, so the game never probes Rumble / Controller / Transfer
+  Paks; their calls answer "no pak"), ports 2-4 CONT_NO_RESPONSE_ERROR. `osContStartQuery` / `osContStartReadData`
+  post the SI event; `osContGetReadData` writes the host pad (`port_set_pad(i, buttons, x, y)`, exported, OSContPad
+  bits). Node: `--tap N MASK` presses MASK for 3 retraces every N retraces (frame-indexed, deterministic).
+- FlashRAM: 131072-byte image (console byte order, erased 0xFF), 128-byte pages, 16 KiB sector erase, programming
+  ANDs bits; `osFlashReadId` = Macronix MX_C. `port_flash_image()` / `port_flash_generation()` exported for the host
+  (persistence: S8).
+- `osVirtualToPhysical`: mirror pointer -> console physical address (0..8 MiB); KSEG0 -> physical; any other
+  pointer (C object) unchanged.
+- RCP registers: `SP_IMEM_START` reads 6103 and `SP_DMEM_START` -1, as after the console's boot code
+  (`check_sp_imem/dmem`, flags the anti-tamper code in app_level/504770.c reads); others read 0.
+
+## Overlays (S3a)
+
+- Code is linked once; "loading" an overlay = its ROM bytes in the mirror + relocation (above) + its **C data reset**:
+  vbe.py puts every writable global of an overlay TU into the wasm data section `ovl_<segment>` (3035 globals, 31
+  sections; main is not reset), wasm-ld gives `__start_/__stop_ovl_<segment>`; `port_mem_init()` snapshots each
+  section after the constructors (vbe fix-ups) and `port_dma_loaded` restores it when a DMA brings the segment's
+  first byte to its VRAM, which is what the console's DMA of `.data` + bzero of `.bss` does. Sections a TU's globals
+  never reach (gc'd) are weak and empty.
+- Residency: the same DMA makes the segment resident at its VRAM and every overlapping segment not (address ->
+  function table). Seen: app_render, more_funcs, intro_code, main_menu, world, window, menu_new_game, oaks_lab;
+  world loaded twice (reset exercised).
+
+## Bitfields (S3a)
+
+IDO allocates bitfields from the MSB, clang (little-endian) from the LSB; in vbe memory a word holds its big-endian
+value, so every bitfield run is declared LSB first under `#ifdef PORT`, padded to whole 32-bit units, with sub-word
+members that share the word (`poseID`, `unk_02`) in an anonymous union: `include/common_structs.h`
+(PokemonPhotoData, PhotoData), `src/tunnel/tunnel.h`, `src/sys/sched.c` (ViSettings), `src/photo_check/993F80.c`,
+`src/more_funcs/5BF20.c`. Checked in the IR: `pokemonID` reads `ashr i32 w, 19` as IDO's bits 31..19. gbi.h/abi.h
+bitfield structs are not used by game C (macros with shifts).

@@ -90,7 +90,7 @@ static const char *const op_names[256] = {
     [0xFB] = "G_SETENVCOLOR", [0xFC] = "G_SETCOMBINE", [0xFD] = "G_SETTIMG", [0xFE] = "G_SETZIMG",
     [0xFF] = "G_SETCIMG"};
 
-typedef struct DlStats { unsigned ops[256], cmds, bad, depth_max; uint32_t hash; } DlStats;
+typedef struct DlStats { unsigned ops[256], cmds, bad, depth_max, addr_log, naddr; uint32_t hash; } DlStats;
 
 /* walk a task's display list (F3DEX2 / L3DEX2 encoding), following G_DL calls and branches; FNV-1a over the words */
 static void dl_walk(uint32_t start, DlStats *st) {
@@ -106,6 +106,9 @@ static void dl_walk(uint32_t start, DlStats *st) {
         st->hash = (st->hash ^ w0) * 16777619u;
         st->hash = (st->hash ^ w1) * 16777619u;
         p += 2;
+        if (st->addr_log && st->naddr < 24 && (op == 0xFD || op == 0xFE || op == 0xFF || op == 0x01 || op == 0xDA ||
+                                               (op == 0xDB && ((w0 >> 16) & 0xFF) == 0x06)))
+            port_log("[dlhist]   %-14s %08X %08X\n", op_names[op], w0, w1), st->naddr++;
         if (op == 0xDB && ((w0 >> 16) & 0xFF) == 0x06) seg_base[((w0 & 0xFFFF) >> 2) & 0xF] = w1;
         else if (op == 0xDE) {
             const uint32_t *t = dl_ptr(w1);
@@ -143,6 +146,8 @@ void osSpTaskStartGo(void *tv) {
     if (t->type == M_GFXTASK_) {
         DlStats st;
         memset(&st, 0, sizeof st);
+        st.addr_log = port_gfx_tasks == 0 || port_gfx_tasks == 199; /* address forms of tasks #1 and #200 */
+        if (st.addr_log) port_log("[dlhist] task #%u: address operands (image / vertex / matrix / segment)\n", port_gfx_tasks + 1);
         dl_walk((uint32_t)(uintptr_t)t->data_ptr, &st);
         port_gfx_tasks++;
         if (port_gfx_tasks == 1) dl_histogram(&st, port_gfx_tasks);
