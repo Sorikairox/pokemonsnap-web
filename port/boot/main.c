@@ -89,6 +89,16 @@ static void fiber_bench(int n) {
              sw ? ms * 1000.0 / sw : 0.0);
 }
 
+/* S10a debug option (default off): --scene N makes start_scene_manager (app_render/46270.c) begin with scene N
+ * (include/enums.h: 0..6 courses, 11 lab, 12 album, 14 report, 17..20 credits, 22 gallery) instead of the main menu.
+ * Game state (save, flags) is whatever the boot left; only for reaching screens in tests. */
+static int debug_start_scene = -1;
+int port_debug_start_scene(int scene) {
+    if (debug_start_scene < 0) return scene;
+    port_log("[boot] debug: first scene %d instead of %d (--scene)\n", debug_start_scene, scene);
+    return debug_start_scene;
+}
+
 int main(int argc, char **argv) {
     int frames = 0, bench = 0, tap_every = 0, tap_mask = 0, tap_end = 0, inputs[64][5], n_inputs = 0, logops[8], n_logops = 0, tdump[8], n_tdump = 0;
     port_log("[boot] Pokemon Snap wasm port (S3a); RDRAM mirror at %p\n", (void *)n64_rdram);
@@ -100,6 +110,7 @@ int main(int argc, char **argv) {
         if (!strcmp(argv[i], "--load-all")) load_all_test();
         else if (!strcmp(argv[i], "--frames") && i + 1 < argc) frames = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--bench")) bench = 1;
+        else if (!strcmp(argv[i], "--scene") && i + 1 < argc) debug_start_scene = atoi(argv[++i]); /* S10a debug */
         else if (!strcmp(argv[i], "--tap") && i + 2 < argc) { /* --tap N MASK: press MASK for 3 retraces every N */
             tap_every = atoi(argv[++i]);
             tap_mask = (int)strtol(argv[++i], NULL, 0);

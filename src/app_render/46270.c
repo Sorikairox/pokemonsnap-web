@@ -254,6 +254,14 @@ void start_scene_manager(s32 arg0) {
     viSetScreenOffsets(sp38, sp38, sp34, sp34);
 
     sceneId = SCENE_MAIN_MENU;
+#ifdef PORT
+    {
+        /* PORT debug option, default off (S10a): the harness's --scene N starts that scene instead of the main menu
+         * (port/boot/main.c); used to reach screens such as the credits without playing to them */
+        extern int port_debug_start_scene(int scene);
+        sceneId = port_debug_start_scene(sceneId);
+    }
+#endif
 
     while (true) {
         gtlSetIntervals(1, 1);
