@@ -98,6 +98,54 @@ exist in two TUs with different signatures). Result: 41 rewritten sites, 12 func
   function-start words, reviewed) or map those data at load time (open, S4).
 - PC-layer calls of game function pointers (thread entry points): `port_call_vi(fp, a0)` (same rules).
 
+## Calls: v0 of void functions (S5: v0_scan.py, v0.py, port_build.py v0_plan)
+
+On MIPS a `void` function whose every return follows a call of a value-returning function leaves that result in v0,
+and IDO-era callers read it (Snap: the Pokemon spawn wrappers `void f(...) { Pokemon_Spawn(...); }`, called through
+`GObj* (*init)(...)`; pokemonAdd() stopped at the first 0, no Pokemon spawned). General rule, no per-function edits:
+- `port/docker/run.sh v0` (toolchain image) -> `port/symbols/v0.tsv`: from the matching build's IDO objects
+  (`objdump -dr`), a data-flow per function of where v0 comes from at each `jr ra` (`call:F`, `set`, `entry`,
+  `icall`, `jr` = jump table; delay slots and branch-likely handled). Ground truth, not the C.
+- port_build.py `v0_plan`: a void function is **promoted** (canonical return i32) when the console's v0 is only call
+  results, the -O0 IR's last calls before each return name the same callees (an IR-only path with no call is accepted:
+  IDO proved it impossible, e.g. a rotated counted loop), and each callee leaves a value in v0 (int/ptr return, or
+  promoted: fixpoint). vbe.py applies `v0.promote` (each `ret void` -> `ret i32` of the last call's result, phi nodes
+  over the CFG) and rewrites the TU's own calls to promoted statics. 275 of 3288 void functions.
+- Void callers drop the result (sigs.py rewrites direct sites; icall trampolines of void sites accept the promoted
+  `i:...` signature on a fast path; `port_call_vi` accepts `i:i`).
+- `port/v0_report.tsv` (committed): every void function, the direct sites that use its value (0 today), the console
+  v0 at its returns and what the port returns. Indirect value calls of a non-promoted void function still read 0 and
+  are logged at run time (`[icall] void target ... called as ...`; 0 on the Beach route).
+
+## Function identity (S5: vbe.py fptr_eq, pc_icall.c __port_fptr_canon)
+
+Data without relocations (the `bin` blobs inside code segments: world block descriptors, Pokemon tables, scene
+setups) holds functions as console addresses: calls work (`__port_fptr_fix`), but `==` with a function did not
+(world/block.c `&drawSkyBox2Cycle == gfx->renderFunc`: every world block GObj was deleted, the Beach was black). Every
+pointer `icmp eq/ne` with a non-constant operand maps it through `__port_fptr_canon`: a console / mirror address that
+starts a function of the overlay resident there (bitmap of compiled functions' console starts) becomes that function's
+table index, anything else is unchanged; pointers compare equal exactly when they do on the console (184 sites).
+`port/tools` survey (scratch, S5): rom-bin data holding function words: the asset bins of every level (render
+functions), cave/river/valley/tunnel code bins (Pokemon tables), main_menu scene setups.
+
+## Console bss layout (S5: vbe.py bss_layout)
+
+The decomp declares some objects smaller than the game uses them and keeps console addresses with unreferenced filler:
+player.c `struct DObjDynamicStore PlayerMatrixStore; // size 0x38` (4 bytes + VLA; the player's DObj writes 0x34
+bytes of matrix data) is followed by filler `D_803AE4A5..D_803AE4A8[0x30]`. clang put IsTutorialEnabled and
+MainCameraBorder* after it: the borders took float bits, `mainCameraSetScissor` emitted `ED FFF000` and every world
+draw was scissored away. Every zero-initialised global that the matching build puts in a bss section now lives at its
+console offset inside one byte array per TU and console section (`@__bss.<tu>.<section>`, 16-aligned at a 16-aligned
+console address, so vbe's sub-word addressing matches the mirror's); the global is an alias of its place (733
+globals; layout from `symbols.tsv` -> `port/build/fvram/<tag>.bss`). Overflows reach the console's neighbours.
+Not covered: initialised `.data` and overflows across TUs (none known).
+
+## Debugging from game C (S5)
+
+`port_game_log(fmt, ...)` (pc_mem.c): printf from game C under `#ifdef PORT` (the format literal is in vbe layout and
+is unswizzled; pass numbers only, `%s` arguments would be vbe too). `port_function_vram(fn)` gives a function's
+console address for logs. Remove such logs before committing.
+
 ## Threads (S3a: pc_os.c)
 
 - `OSThread` = an Emscripten fiber (ASYNCIFY) with **static, fixed-address stacks** (256 slots x 128 KiB C stack +
@@ -119,6 +167,10 @@ exist in two TUs with different signatures). Result: 41 rewritten sites, 12 func
   ping-ponging); boot -> main menu -> Oak's lab: **peak 16 live threads** (49 created over 3600 retraces), 17-31
   switches per retrace, 0.1-0.7 ms per retrace for the whole game with no renderer. Levels (one om thread per object
   process, `omCreateProcess` kind 0) not reached yet: measure there (S5).
+- Measured in the level (node, S5, Beach start to end, `s5_node14`): **peak 45 live threads** (323 created by retrace
+  12500; one om thread per Pokemon process), 56 fiber switches per retrace on average (max 84), 0.15 ms per retrace
+  (max 0.32) for the game without a renderer; `--bench` 1.31 us per switch. Fiber count and switch cost are not a
+  risk (PLAN risk 2). Browser (SwiftShader, game + renderer + screenshots): ~7.4 ms per retrace.
 
 ## Retrace, SP, DP, AI (S3a: pc_rcp.c)
 
@@ -127,8 +179,11 @@ exist in two TUs with different signatures). Result: 41 rewritten sites, 12 func
   `osViSetEvent` message every `retraceCount` retraces, then the threads
   run until idle. `osViSwapBuffer` / `osViGetCurrentFramebuffer` / `osViGetNextFramebuffer` as libultra.
 - `osSpTaskLoad` + `osSpTaskStartGo` (= `osSpTaskStart`): a graphics task (`M_GFXTASK`) runs `port_gfx_task(task)`
-  (weak hook; the renderer's strong definition replaces it) and posts SP done then DP full sync; an audio task
-  posts SP done (audio HLE: S7). Never yielded (`osSpTaskYielded` 0). `osDpSetNextBuffer` posts DP. Each graphics
+  (weak hook; the renderer's strong definition replaces it); SP done then DP full sync are posted **when no thread is
+  runnable any more** (S5: `port_rcp_pending` / `port_rcp_complete` in `port_run_threads`): on the console the RDP takes
+  milliseconds and the game thread queues the frame's `SC_TASK_TYPE_GFX_END` meanwhile, which sched.c attaches to the
+  running gfx task so that DP full sync calls `scPostProcessFunc` (the Pokemon detector) and swaps; posted at once,
+  the detector never ran. An audio task posts SP done at once (audio HLE: S7). Never yielded (`osSpTaskYielded` 0). `osDpSetNextBuffer` posts DP. Each graphics
   task is walked (display-list census: opcode counts and an FNV hash, `[task]` lines; the first one's histogram
   `[dlhist]`). `osAiSetFrequency` returns the real DAC rate; `osAiSetNextBuffer` accepts and drops (S7).
 - Display-list address forms seen (for the renderer): wasm addresses of C objects (matrices in bss, 0x1006xxxx),

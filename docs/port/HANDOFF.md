@@ -2,6 +2,63 @@
 
 Newest session first. Read `docs/port/PLAN.md` (goal, survey, approach, phases, rules) before working.
 
+## S5 — 2026-11-09: Beach played start to end (world, Pokemon, detector, photos) by scripted input
+
+Four root causes, each fixed generally (no game C edits; matching build unchanged), one commit each:
+
+1. **Function identity** (a2547a9): world/block.c compares `gfx->renderFunc` with `&drawSkyBox2Cycle`,
+   `&renRenderModelTypeA`... The block descriptors are in beach_assets' unmapped bin (A74F0.bin, no relocations), so
+   renderFunc was the mirror address 0x108A1530 (console 800A1530 = renderModelTypeAFogged), never equal to a table
+   index: **every world block GObj was deleted** (evidence: `[dbg] block 0 renderFunc 0x108a1530 (A 0x1eb ...)`).
+   vbe.py `fptr_eq` + `__port_fptr_canon`: pointer eq/ne tests compare canonical functions (MEMORY.md "Function
+   identity"). The "camera never reaches its start position" lead was wrong: the camera moved along the rail all along
+   (`gMovementState` and lookAt logged moving); the 1020.22 depths were the first frames' LOD tests.
+2. **Void spawn wrappers / v0** (64b25a7): as decided, in the build tools: `port/tools/v0_scan.py` (`run.sh v0`,
+   v0 at every `jr ra` of the IDO objects -> `port/symbols/v0.tsv`), `v0.py` + `v0_plan`: 275 of 3288 void functions
+   return the v0 of their last call (all 22 spawn wrappers among them; console data-flow and IR must agree);
+   `port/v0_report.tsv` lists every void function, direct sites using its value (0) and the resolution; indirect
+   value calls of the rest are logged at run time (0 on the route). `[icall] void targets called as values`: 2 -> 0.
+3. **bss overflow into clang's neighbours** (7e62e71): `PlayerMatrixStore` (declared 4 bytes + VLA, written 0x34
+   bytes) overflowed into IsTutorialEnabled / MainCameraBorder*; `mainCameraSetScissor` then emitted `ED FFF000`
+   (ulx saturated) and the world vanished again once Pokemon spawned (evidence: render-target probes black before the
+   first detector copy; scissor words in `--logops`; wasm map neighbours). vbe.py `bss_layout`: each TU's bss is laid
+   out as on the console (733 globals, aliases into one array per section).
+4. **RCP completion timing** (20459ff): SP/DP events were posted inside osSpTaskStart, so the frame's GFX_END task
+   never found a running gfx task: no `scPostProcessFunc`, **the Pokemon detector never ran** (evidence: sched.c log
+   `fb 0` at DP full sync in the level). Now posted when no thread is runnable (`port_rcp_complete`).
+Plus e02252b: `port_game_log` (printf from game C, vbe format string) for debugging.
+
+Verified (screenshots looked at; all in `port_work/`, ROM-derived, never committed):
+- Route: `node port/web/run.mjs --out port_work/s5_route_a --frames 12600 --every 300 --tap 120 0x8000 --input
+  2940:0x4000:3,4000:0x2000:400` (A every 120, B at 2940 = Beach, Z held at the tutorial). `s5_route_a/sheet.png`
+  (contact sheet): f03900 Pidgey + "Press Z to aim", f04200 zoomed view with the CPU red dot and "Press A to shoot",
+  then the whole course: Doduo, Pikachu, Butterfree, Snorlax asleep (f06600, Z effect), Meowth/Kangaskhan/Scyther
+  areas, river, end tunnel, f12300 the end gate, f12600 fade out. `s5_route_end/f13300.png`: the camera check
+  ("I'll choose which pictures to show to Prof. Oak!") with 3 photo frames. Earlier: `s5_web13/f04150.png` zoom +
+  red dot + "PIDGEY NEW", film 60 -> 57; `s5_web8/f04200.png` Doduo + Pikachu after the bss fix.
+- Detector (S6 owns correctness): Pidgey (16) found in focus at retrace ~3831 (8x8 centre read-backs), Doduo (84)
+  later; the tutorial waits for Z, the zoom shows the red dot, A takes photos. Node has no GL, so it never finds a
+  Pokemon in focus: node and browser now diverge from the first focus (identical task hashes before).
+- Determinism: two browser route runs (`s5_route_a`, `_b`): 42/42 PNGs and task logs identical; node: two 5000-retrace
+  runs, tasks.txt identical.
+- Threads (PLAN risk 2, node `s5_node14`, Beach start to end): peak 45 live threads, 323 created, 56 switches per
+  retrace (max 84), 0.15 ms per retrace without a renderer, 1.31 us per switch (`--bench`): not a risk. Browser
+  (SwiftShader): ~7.4 ms per retrace for game + renderer.
+- `port/gfx/test/run.sh`: 17/17 checks OK. Matching build: `build/pokemonsnap.z64: OK`.
+
+### Remaining bugs / Next
+
+1. S6 (read-backs): camera-check thumbnails are white with a strip of sky (`s5_route_end/f13300.png`); score and
+   photo-check not exercised. Node cannot reproduce the browser's game state past the first detector frame (no GL):
+   consider a CPU fallback for the 8x8 centre read-back in node, or route tests in the browser only.
+2. Renderer: sky box shows lighter blue rectangles at the top corners (`s5_route_a` f04200..f05400); some cliffs and
+   the end tunnel look flat grey / untextured (`s5_web9/f08000.png`, `f11500.png`): check against an emulator.
+3. After the tutorial the film stays at 57 although A is tapped every 120 retraces: IsInputDisabled stays true until
+   `func_8009BBF4() >= 3` (app_render/47380.c counter); confirm on the console whether the first run behaves so.
+4. Indirect value calls of non-promoted void functions are only logged at run time; route the other levels (S10) and
+   watch `[icall] void target`. `bss_layout` does not cover initialised `.data` or overflows across TUs.
+5. S7 audio, S8 flash, S9 retrowser module as planned.
+
 ## S3 (S3a + S3b + S3c) — 2026-11-08: first frames in the browser; title -> menus -> Oak's lab by scripted input
 
 S3a (CPU/OS) and S3b (renderer) ran in parallel worktrees and were merged into `web` (82b30b0); S3c wired them
