@@ -1,0 +1,16 @@
+{
+  "$schema": "https://retrowser.app/spec/retrowser.schema.json",
+  "retrowser": 1,
+  "id": "pokemonsnap-us",
+  "title": "Pokémon Snap (source port)",
+  "platform": "n64",
+  "rom": { "sha1": ["edc7c49cc568c045fe48be0d18011c30f393cbaf"] },
+  "files": {
+    "wasm": { "path": "pokemonsnap.wasm", "sha256": "", "size": 0 },
+    "js": { "path": "pokemonsnap.js", "sha256": "", "size": 0, "factory": "createPokemonSnap" },
+    "data": [{ "path": "pokemonsnap.romfill", "sha256": "", "size": 0 }]
+  },
+  "video": "webgl",
+  "hz": 60,
+  "save": { "kind": "flash", "size": 131072 }
+}

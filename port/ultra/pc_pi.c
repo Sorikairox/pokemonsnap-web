@@ -5,7 +5,7 @@
  * the PI manager does when the transfer ends. port_dma_loaded() then relocates what the copy brought in when it is a
  * segment landing at its own VRAM (overlays, asset segments; pc_mem.c).
  * SI: one standard controller in port 1, no pak (status 0: no Controller / Rumble / Transfer Pak); ports 2-4 do not
- * answer. The pad comes from the host (port_set_pad, active-high OSContPad bits). Rumble: later (rtw_rumble).
+ * answer. The pad comes from the host (port_set_pad, active-high OSContPad bits). Rumble: port_rumble (S9).
  * Flash (S8): the game's own driver (src/os/osFlash.c) runs on a FlashRAM device model, port/save/flashram.c; DMAs
  * on its handle go there. */
 #include "pc_os.h"
@@ -93,7 +93,13 @@ void osContGetReadData(void *padv) {
 /* paks: none present (the game only probes them when status says CONT_CARD_ON, which it never does) */
 int __osContRamRead(void *mq, int ch, int addr, void *buf) { (void)mq; (void)ch; (void)addr; (void)buf; return 1; }
 int __osContRamWrite(void *mq, int ch, int addr, void *buf, int f) { (void)mq; (void)ch; (void)addr; (void)buf; (void)f; return 1; }
-int __osMotorAccess(void *pfs, int on) { (void)pfs; (void)on; return 1; }
+/* S9: motor on/off goes to port_rumble (the retrowser target's port/rtw/rtw.c forwards it to rtw_rumble). Not reached
+ * while osMotorInit reports no pak; the game never starts the motor anyway (only sched.c's init + stop at reset). */
+__attribute__((weak)) void port_rumble(int channel, int on) { (void)channel; (void)on; }
+int __osMotorAccess(void *pfs, int on) {
+    port_rumble((int)vbe_ld32((unsigned char *)pfs + 8), on); /* OSPfs.channel */
+    return 0;
+}
 int osMotorInit(void *mq, void *pfs, int ch) { (void)mq; (void)pfs; (void)ch; return 1; }  /* PFS_ERR_NOPACK */
 int osPfsInitPak(void *mq, void *pfs, int ch) { (void)mq; (void)pfs; (void)ch; return 1; }
 int osPfsFileState(void *pfs, int f, void *st) { (void)pfs; (void)f; (void)st; return 1; }

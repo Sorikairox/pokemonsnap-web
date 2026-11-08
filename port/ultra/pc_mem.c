@@ -257,9 +257,38 @@ void __vbe_memset(unsigned char *d, unsigned c, unsigned n) {
     for (; i < n; i++) vbe_st8(d + i, c);
 }
 
+/* S9: the retrowser target ships a template wasm whose ROM-derived bytes are filled from the player's ROM in
+ * rtw_start (port/rtw/romfill.py, rtw.c), after these constructors would have run. There (port_vbe_fix_defer = 1,
+ * a strong definition in port/rtw/rtw.c) the conversions are queued and run by port_vbe_fix_run() after the fill,
+ * in constructor order; elsewhere (this weak 0) they run at once as before. */
+__attribute__((weak)) int port_vbe_fix_defer = 0;
+static void vbe_fix_now(unsigned char *g, const unsigned *desc, unsigned n);
+static struct { unsigned char *g; const unsigned *desc; unsigned n; } vbe_fix_q[8192];
+static unsigned vbe_fix_qn;
+void __vbe_fix(unsigned char *g, const unsigned *desc, unsigned n) {
+    if (port_vbe_fix_defer == 1) {
+        if (vbe_fix_qn < sizeof vbe_fix_q / sizeof vbe_fix_q[0]) {
+            vbe_fix_q[vbe_fix_qn].g = g;
+            vbe_fix_q[vbe_fix_qn].desc = desc;
+            vbe_fix_q[vbe_fix_qn].n = n;
+            vbe_fix_qn++;
+            return;
+        }
+        port_vbe_fix_defer = 3; /* queue full: port_vbe_fix_run reports it */
+    }
+    vbe_fix_now(g, desc, n);
+}
+/* returns the number of queued conversions run, or -1 if the queue overflowed (some ran before the fill) */
+int port_vbe_fix_run(void) {
+    int overflow = port_vbe_fix_defer == 3;
+    port_vbe_fix_defer = 2;
+    for (unsigned i = 0; i < vbe_fix_qn; i++) vbe_fix_now(vbe_fix_q[i].g, vbe_fix_q[i].desc, vbe_fix_q[i].n);
+    return overflow ? -1 : (int)vbe_fix_qn;
+}
+
 /* Convert the 1/2/8-byte scalars of a game global's initialiser (laid out little-endian by clang) into the vbe
  * layout, once at startup. desc = {vbe.py size, LLVM alloc size, n x {offset, size, count, stride}}. */
-void __vbe_fix(unsigned char *g, const unsigned *desc, unsigned n) {
+static void vbe_fix_now(unsigned char *g, const unsigned *desc, unsigned n) {
     unsigned end = 0, mysize = desc[0], llsize = desc[1];
     desc += 2;
     if (mysize > ((llsize + 3) & ~3u)) {

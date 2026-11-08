@@ -152,19 +152,26 @@ unsigned port_gfx_tasks, port_audio_tasks, port_other_tasks;
 
 void osSpTaskLoad(void *t) { sp_loaded = t; }
 
+/* S9: the per-task census and [task] line (tests compare them); the retrowser target turns them off (rtw.c's strong
+ * definition = 0, unless its node test host asks for them) */
+__attribute__((weak)) int port_task_log = 1;
 void osSpTaskStartGo(void *tv) {
     N64Task *t = tv;
     if (t != sp_loaded) port_log("[sp] osSpTaskStartGo without osSpTaskLoad\n");
     if (t->type == M_GFXTASK_) {
         DlStats st;
         memset(&st, 0, sizeof st);
-        st.addr_log = port_gfx_tasks == 0 || port_gfx_tasks == 199; /* address forms of tasks #1 and #200 */
-        if (st.addr_log) port_log("[dlhist] task #%u: address operands (image / vertex / matrix / segment)\n", port_gfx_tasks + 1);
-        dl_walk((uint32_t)(uintptr_t)t->data_ptr, &st);
+        if (port_task_log) {
+            st.addr_log = port_gfx_tasks == 0 || port_gfx_tasks == 199; /* address forms of tasks #1 and #200 */
+            if (st.addr_log) port_log("[dlhist] task #%u: address operands (image / vertex / matrix / segment)\n", port_gfx_tasks + 1);
+            dl_walk((uint32_t)(uintptr_t)t->data_ptr, &st);
+        }
         port_gfx_tasks++;
-        if (port_gfx_tasks == 1) dl_histogram(&st, port_gfx_tasks);
-        port_log("[task] vi %u gfx #%u dl %08X ucode %08X: %u commands, hash %08X\n", port_vi_count, port_gfx_tasks,
-                 (uint32_t)(uintptr_t)t->data_ptr, port_wasm_to_n64(t->ucode), st.cmds, st.hash);
+        if (port_task_log) {
+            if (port_gfx_tasks == 1) dl_histogram(&st, port_gfx_tasks);
+            port_log("[task] vi %u gfx #%u dl %08X ucode %08X: %u commands, hash %08X\n", port_vi_count, port_gfx_tasks,
+                     (uint32_t)(uintptr_t)t->data_ptr, port_wasm_to_n64(t->ucode), st.cmds, st.hash);
+        }
         port_gfx_task(t);
         /* S5: the RCP "finishes" when the CPU has nothing left to run (port_run_threads), not at once: on the console
          * the RDP takes milliseconds, and the game thread queues the frame's SC_TASK_TYPE_GFX_END meanwhile. sched.c

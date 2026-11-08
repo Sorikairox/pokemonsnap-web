@@ -13,6 +13,7 @@ Phases (outputs in port/build/, gitignored; nothing here reads the ROM or the ma
                 libultra functions without a port body -> logged stubs with their canonical signature
                 (port/tools/gen_stubs.py) -> port/build/gen, port/stubs.tsv
   7. link       emcc -> port/build/web/pokemonsnap.{js,wasm} (undefined symbols are an error)
+  8. --rtw      (S9) also the retrowser target: port/build/rtw/pokemonsnap.{js,wasm} (link_rtw; docs/port/RTW.md)
 """
 import collections, concurrent.futures as cf, hashlib, json, os, re, subprocess, sys
 
@@ -553,6 +554,48 @@ def main():
     nwarn = se.count('warning')
     print(f'link OK: {js} ({os.path.getsize(js[:-3] + ".wasm")} bytes wasm), {nwarn} link warnings '
           f'(port/build/link_log.txt); {stub_rep}')
+    if '--rtw' in sys.argv:
+        link_rtw(link, js)
+
+
+RTW = f'{OUT}/rtw/link'   # the linked module; port/rtw/build.sh makes the shipped build in port/build/rtw/dist
+# S9: the retrowser target (docs/port/RTW.md). The same objects as the harness link plus port/rtw/rtw.c; a worker-only
+# glue (no node, no DOM, no eval) that takes the wasm from Module.wasmBinary; only the rtw_* exports the standard
+# defines (plus port_rtw_retrace for the loop driver); host imports through port/rtw/library_rtw.js.
+RTW_EXPORTS = ['rtw_rom_buffer', 'rtw_start', 'rtw_input', 'rtw_pause', 'rtw_resize', 'rtw_save_ptr', 'rtw_save_size',
+               'rtw_save_generation', 'rtw_save_load', 'rtw_audio_rate', 'rtw_audio_drain', 'rtw_audio_buffer',
+               'port_rtw_retrace', 'port_rtw_test_log']
+
+
+def link_rtw(link, js):
+    os.makedirs(RTW, exist_ok=True)
+    obj = f'{PCOBJ}/port__rtw__rtw.o'
+    rc, so, se = run(PC_FLAGS + ['-Iport/save', 'port/rtw/rtw.c', '-o', obj])
+    if rc:
+        print('--- FAILED (rtw) port/rtw/rtw.c\n' + se[-3000:]); sys.exit(1)
+    if se.strip():
+        print(se[-2000:])
+    out = f'{RTW}/pokemonsnap.js'
+    flags = []
+    skip = False
+    for a in link[1:]:
+        if skip:
+            skip = False; continue
+        if a == '-o':
+            skip = True; continue
+        if a.startswith('-sENVIRONMENT=') or a.startswith('-sEXPORTED_FUNCTIONS=') or \
+                a.startswith('-sEXPORTED_RUNTIME_METHODS=') or a.startswith('-Wl,-Map='):
+            continue
+        flags.append(a)
+    rlink = ['emcc'] + flags + [obj, '-o', out, '-sENVIRONMENT=worker', '-sDYNAMIC_EXECUTION=0',
+                                '-sEXPORTED_FUNCTIONS=' + ','.join('_' + e for e in RTW_EXPORTS),
+                                '-sEXPORTED_RUNTIME_METHODS=HEAPU8', '--js-library', 'port/rtw/library_rtw.js',
+                                '--pre-js', 'port/rtw/rtw_glue.js', f'-Wl,-Map={RTW}/pokemonsnap.map']
+    rc, so, se = run(rlink)
+    open(f'{RTW}/link_log.txt', 'w').write(se)
+    if rc:
+        print('--- RTW LINK FAILED (port/build/rtw/link/link_log.txt)\n' + se[-6000:]); sys.exit(1)
+    print(f'rtw link OK: {out} ({os.path.getsize(out[:-3] + ".wasm")} bytes wasm), {se.count("warning")} link warnings')
 
 
 def gen_segments(ovl_secs=()):
