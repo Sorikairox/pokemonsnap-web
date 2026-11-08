@@ -88,6 +88,14 @@ bits 21..16 as on the console. `PhotoData` / `PokemonPhotoData` (photos in the s
 Other single-bit structs checked in S8 do **not** reach the save: `camera_check.h UnkIndigoHalibut.unk_18_*`
 (camera-check bss, C bitfield access and whole-struct `qsort2` copies only) — left unconverted.
 
+## Crafted saves (S10a)
+
+`snap_save.py --write OUT (--base IN | --new NAME) [--courses N] [--items apple,pester,flute,dash] [--flag NAME=V]
+[--album-from-report R:A]` writes an image the game accepts (MD4 recomputed). Courses = `unk_64_29` (top 3 bits of
+0x64, 0..6 beyond the Beach) with `unk_50` set equal; `hasFinishedTutorial` (bit 7) actually unlocks the Album Mark /
+PKMN Album (set by the lab once the report has 4 species). Details and routes: docs/port/notes/S10a.md. Crafted
+images are personal data: `port_work/` only.
+
 ## Hosts
 
 - retrowser (S9): copy the stored image to `rtw_save_ptr()` before `main`; persist when `rtw_save_generation()`

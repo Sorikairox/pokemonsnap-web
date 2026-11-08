@@ -7,6 +7,39 @@ default branch `web`; retrowser build on the orphan branch `rtw-dist`; MIT licen
 orchestrator pushes, only to `pub`; never to `origin` (ethteck). Rebuild `rtw-dist` with `port/rtw/build.sh` (check
 `--rom` OK) after port changes. Older entries saying "private" / "never push" describe the state at their time.
 
+## S10a — 2026-11-09: every course and screen reached; survey (no blocker found)
+
+Notes, per-course table, routes and the prioritized bug list: **docs/port/notes/S10a.md**. Commits: 286c28e (docs:
+public repo), d9423fb (snap_save.py --write), c190fca (debug `--scene N`, default off), 20e22db (course_route.mjs,
+sheet.mjs, `--album-from-report`), and this docs commit.
+
+1. **Access**: crafted save (`snap_save.py --write --base <game save> --courses 6 --items ... --flag
+   hasFinishedTutorial=1 --album-from-report 8:0,8:1`): fields from the C (`unk_64_29` courses open, `unk_50`, item
+   flags; PFID 8 "hasFinishedTutorial" = Album unlocked), MD4 recomputed; the game accepts it and lists all 7 courses.
+   Credits / gallery also via the harness debug option `--scene N` (`#ifdef PORT` in start_scene_manager).
+2. **Survey**: all 7 courses run start -> end gate -> camera check by scripted input (`course_route.mjs`); Oak's
+   check of another Pokémon (Vulpix, 2 kinds / 3040), Album Mark, PKMN Album, PKMN Report, Gallery, credits 17 and 19
+   all reached. Every log clean (0 stubs / unknown opcodes / bad addresses / icall misses / void-as-value; audio 0
+   clipped, 0 FIFO-full). 7.0-7.8 ms per retrace mean, max 14.1 (SwiftShader).
+3. **Bug list** (suspects, no reference to compare): Volcano cart stops at the Moltres egg when the player does
+   nothing (game's own bump mechanic; verify spawn position vs an emulator); cave floor seam near the end gate
+   (near plane?); tunnel colour gradients and blurry close-up rock textures (LOD/filter); unused 6th parameter on
+   river/cave/valley spawn wrappers (converted icalls, harmless); node `--input` limited to 64 entries.
+
+Verified at the end: S8/S9 route re-run = `port_work/s9/route_a` byte for byte (7 PNGs, WAV, flash); `port/gfx/test/run.sh`
+CHECKS + CHECKS2 ALL OK; node `port-test --frames 5000` OK, 0 stubs; matching build `build/pokemonsnap.z64: OK`;
+`port/rtw/build.sh` check OK (.z64 and .n64), romscan 0 runs >= 64, new build id eabd55f9… (**rtw-dist must be
+rebuilt / pushed by the orchestrator**, the template changed: 57,576 bytes filled); node host 3000 retraces OK.
+Screenshots looked at: contact sheets of every course run (`port_work/s10a/c*_sheet_*.png`), the screen runs and
+full-size frames listed in the notes.
+
+### Next
+1. Fix agents per area (notes "Prioritized bug list"); renderer items need a reference capture first.
+2. A real progression route (signs, switches, Mew photo -> credits by play) needs aimed photos (stick scripting).
+3. Raise node_run's 64-entry `--input` table if node replays of course routes are wanted.
+
+Downloads: none.
+
 ## S9 — 2026-11-09: the retrowser module (worker build, template + fill, local host e2e)
 
 Design and commands: **docs/port/RTW.md**. Commits: fd4ca02 (S7 + S8 + R1 handoff), 780ef80 (module target),
