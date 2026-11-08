@@ -957,10 +957,18 @@ int rdp_target_height(void) { return cur_target ? cur_target->height : 240; }
 
 /* ------------------------------------------------------------------ display (VI) */
 void port_gfx_vi_frame(const void *fb, int width) {
-    if (port_gfx_init() < 0 || !fb) return;
+    if (port_gfx_init() < 0) return;
     flush();
-    unsigned char *p = gfx_addr((uint32_t)(uintptr_t)fb);
-    if (!p) return;
+    unsigned char *p = fb ? gfx_addr((uint32_t)(uintptr_t)fb) : 0;
+    if (!p) {   /* no framebuffer yet, or the VI is blanked (osViBlack): a black screen */
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        glDisable(GL_SCISSOR_TEST);
+        glClearColor(0, 0, 0, 1);
+        glClear(GL_COLOR_BUFFER_BIT);
+        port_gfx_stats.presents++;
+        state_dirty = 1;
+        return;
+    }
     if (width <= 0) width = 320;
     Target *t = target_get(p, width, SIZ_16b, width == 640 ? 480 : 240);
     if (t->dirty_y1 <= t->dirty_y0) target_sync_cpu(t);   /* clean: RDRAM is authoritative (CPU-drawn frames) */

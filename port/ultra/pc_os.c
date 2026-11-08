@@ -124,6 +124,24 @@ static void fiber_entry(void *arg) {
     osDestroyThread(NULL);
 }
 
+/* debug (S3c): every live thread with its entry (console address), priority, state, the queue it blocks on (console
+ * address) and how often it ran since the previous dump. Exported; node: --threads F. */
+EMSCRIPTEN_KEEPALIVE void port_thread_dump(void) {
+    static const char *const sn[] = {"free", "stopped", "ready", "running", "waiting", "dead"};
+    static unsigned last[MAX_THREADS];
+    unsigned port_function_vram(void *fn);
+    port_log("[threads] retrace %u\n", port_vi_count);
+    for (int i = 0; i < MAX_THREADS; i++) {
+        PcThread *p = &slots[i];
+        if (p->state == S_FREE || p->state == S_DEAD) continue;
+        port_log("[threads] slot %3d id %3d pri %3d %-8s entry %08X arg %08X wait %s %08X ran %u\n", i, (int)p->t->id,
+                 (int)p->t->priority, sn[p->state], port_function_vram(p->entry), port_wasm_to_n64(p->arg),
+                 p->waitq ? (p->waitsend ? "send" : "recv") : "-", p->waitq ? port_wasm_to_n64(p->waitq) : 0,
+                 p->switches - last[i]);
+        last[i] = p->switches;
+    }
+}
+
 /* host side: run threads until none is runnable */
 void port_run_threads(void) {
     if (!host_init) { emscripten_fiber_init_from_current_context(&host_fiber, host_astack, A_STACK); host_init = 1; }
@@ -323,9 +341,19 @@ static uint32_t int_mask = 0x003FFF01u; /* OS_IM_ALL */
 int osSetIntMask(int m) { int o = (int)int_mask; int_mask = (uint32_t)m; return o; }
 void __osSetWatchLo(int v) { (void)v; }
 void osInvalICache(void *p, int n) { (void)p; (void)n; }
-void osInvalDCache(void *p, int n) { (void)p; (void)n; }
-void osWritebackDCache(void *p, int n) { (void)p; (void)n; }
-void osWritebackDCacheAll(void) {}
+/* The data cache does not exist here, but the renderer keeps colour images on the GPU (port/gfx, RENDERER.md): an
+ * invalidate means the CPU is about to read [p, p+n) (GPU-drawn pixels are written into RDRAM first), a write-back
+ * means the CPU wrote there (images in range are re-uploaded before their next use). KSEG0 addresses map to the
+ * mirror. */
+void port_gfx_inval_dcache(const void *p, uint32_t len);
+void port_gfx_writeback_dcache(const void *p, uint32_t len);
+static const void *cache_ptr(const void *p) {
+    uintptr_t a = (uintptr_t)p;
+    return a >= 0x80000000u ? (const void *)(n64_rdram + (a & (PORT_RDRAM_SIZE - 1))) : p;
+}
+void osInvalDCache(void *p, int n) { if (n > 0) port_gfx_inval_dcache(cache_ptr(p), (uint32_t)n); }
+void osWritebackDCache(void *p, int n) { if (n > 0) port_gfx_writeback_dcache(cache_ptr(p), (uint32_t)n); }
+void osWritebackDCacheAll(void) { port_gfx_writeback_dcache(0, 0); }
 
 /* Pointers inside the RDRAM mirror give their N64 physical address (0..8 MiB), as on the console: the audio library
  * and the RCP command lists keep these as numbers. Any other pointer (a C object in wasm) is returned unchanged; every

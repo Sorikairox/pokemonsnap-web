@@ -34,9 +34,6 @@ void port_log(const char *fmt, ...) {
     vprintf(fmt, ap);
     va_end(ap);
 }
-static int sp_done, dp_done;
-void port_sp_task_done(void) { sp_done++; }
-void port_dp_full_sync(void) { dp_done++; }
 
 #define K0(phys) (0x80000000u | (phys))
 #define FB_PHYS 0x300000u
@@ -392,7 +389,8 @@ unsigned char *gfx_test_run(void) {
            port_gfx_stats.draws, port_gfx_stats.verts, port_gfx_stats.culled, port_gfx_stats.tex_decodes,
            port_gfx_stats.tex_hits, port_gfx_stats.resolves, port_gfx_stats.resolve_px, port_gfx_stats.uploads,
            port_gfx_stats.unknown_ops, port_gfx_stats.bad_addr);
-    check("events", sp_done == 1 && dp_done == 1, "sp_task_done %d dp_full_sync %d", sp_done, dp_done);
+    check("events", port_gfx_stats.tasks == 1 && port_gfx_stats.fullsyncs == 1, "tasks %u full syncs %u",
+          port_gfx_stats.tasks, port_gfx_stats.fullsyncs);
     check("culling", port_gfx_stats.culled == 1, "%u culled", port_gfx_stats.culled);
     check("unknown_ops", port_gfx_stats.unknown_ops == 0 && port_gfx_stats.bad_addr == 0, "%u unknown, %u bad addresses",
           port_gfx_stats.unknown_ops, port_gfx_stats.bad_addr);

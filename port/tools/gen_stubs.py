@@ -34,7 +34,7 @@ def nm(paths):
                 continue
             path, name, t = m[1], m[2], m[3]
             d, u = out.setdefault(path, (set(), set()))
-            if t == 'U':
+            if t in ('U', 'w', 'v'):  # w / v: weak undefined (port/gfx's weak gspL3DEX2_fifoTextStart, S3c)
                 u.add(name)
             elif t not in ('t', 'd', 'b', 'r'):  # locals do not resolve other objects' references
                 d.add(name)
@@ -101,7 +101,10 @@ def generate(game_objs, pc_objs, can, out):
               '__data_end', '__dso_handle', 'n64_rdram',  # + what gen/relocs.c defines:
               'port_reloc_targets', 'port_relocs', 'port_reloc_ranges'}
     # __start_/__stop_<section>: defined by wasm-ld for the ovl_<segment> data sections (S3a, port_build.py)
-    need = sorted(n for n in refs if n not in defined and n not in linker and not n.startswith(('__start_', '__stop_', 'emscripten_')))  # emscripten_*: JS library
+    # emscripten_*, gl* (WebGL2) and port_gfx_gl_create (port/gfx/gfx_gl.js): JS library imports, never stubs (S3c)
+    js_lib = lambda n: n.startswith('emscripten_') or n == 'port_gfx_gl_create' or re.match(r'gl[A-Z]', n)
+    need = sorted(n for n in refs if n not in defined and n not in linker and not n.startswith(('__start_', '__stop_'))
+                  and not js_lib(n))
     labels = {}   # name -> (vram, size)
     for name, (v, sz, typ, bind, seg) in syms.items():
         if bind == 'global' and typ in ('data', 'none') and RD0 <= v < RD0 + RDSZ and name not in defined \

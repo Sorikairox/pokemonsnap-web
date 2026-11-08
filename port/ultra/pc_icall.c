@@ -104,6 +104,7 @@ static const char *site_str(int n, unsigned k, unsigned rk, char *buf) {
     return buf;
 }
 
+unsigned port_function_vram(void *fn);
 /* A void function called through a value-returning pointer reads 0 here, v0 on the N64 (Conker P373): logged once
  * per target so each can be audited. */
 #define VOID_SEEN_MAX 256
@@ -116,8 +117,8 @@ void port_icall_note(void *fp, unsigned tsig, int n, unsigned k, unsigned rk) {
         for (; i < void_nseen && void_seen[i] != fp; i++) {}
         if (i == void_nseen && void_nseen < VOID_SEEN_MAX) {
             void_seen[void_nseen++] = fp;
-            port_log("[icall] void target fn #%u (%s) called as %s: reads 0 here, v0 on the N64 (audit)\n",
-                     (unsigned)(uintptr_t)fp, port_fsig_name(tsig), site_str(n, k, rk, b));
+            port_log("[icall] void target fn #%u (console %08X, %s) called as %s: reads 0 here, v0 on the N64 (audit)\n",
+                     (unsigned)(uintptr_t)fp, port_function_vram(fp), port_fsig_name(tsig), site_str(n, k, rk, b));
         }
     }
     if (port_icall_slow_calls++ < 16)
@@ -130,4 +131,11 @@ void port_icall_report(void) {
              "%u console addresses; %u mismatched calls converted, %u void targets called as values; %u function "
              "pointers mapped from addresses, %u not found\n", fsig_regs, fsig_over, fsig_clash, nfvram,
              port_icall_slow_calls, void_nseen, fptr_fixes, fptr_fails);
+}
+
+/* function (table index) -> its console address, 0 if unknown (debug: port_thread_dump, S3c) */
+unsigned port_function_vram(void *fn) {
+    for (unsigned i = 0; i < nfvram; i++)
+        if (fvram[i].fn == fn) return fvram[i].vram;
+    return 0;
 }

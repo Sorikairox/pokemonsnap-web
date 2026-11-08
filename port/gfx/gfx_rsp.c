@@ -351,6 +351,8 @@ static void run_dl(uint32_t start) {
             if (i < 64) {
                 const GfxVtx *v = &vbuf[i];
                 float zs = (v->w != 0 ? v->z / v->w : 0) * vp_sz + vp_tz;
+                if (log_ops) port_log("[gfx] branch_z v%u x %f y %f z %f w %f -> screen z %f vs %f (vp z %f %f)\n", i,
+                                      v->x, v->y, v->z, v->w, zs, w1 / 65536.0f, vp_sz, vp_tz);
                 if (zs * 65536.0f <= (float)w1 || v->w <= 0) {
                     const uint32_t *t = (const uint32_t *)gfx_addr(rdphalf1);
                     if (t) pc = t;
@@ -445,8 +447,6 @@ static void rsp_reset(void) {
 
 /* OSTask (ultralib PR/sptask.h, 32-bit fields): type 0x00, flags 0x04, ucode_boot 0x08, ucode 0x10, ucode_data 0x18,
  * output_buff 0x28, data_ptr 0x30, data_size 0x34 */
-__attribute__((weak)) void port_sp_task_done(void);
-__attribute__((weak)) void port_dp_full_sync(void);
 
 void port_gfx_run_dl(const void *dl, int l3dex2) {
     port_gfx_init();
@@ -471,6 +471,7 @@ void port_gfx_task(void *task) {
         run_dl(data);
         rdp_end_task();
     } else gfx_log_once(0x7A5C0000 | type, "port_gfx_task: task type %u is not a graphics task", type);
-    if (port_sp_task_done) port_sp_task_done();
-    if (gfx_saw_fullsync && port_dp_full_sync) port_dp_full_sync();
+    /* the PC layer (port/ultra/pc_rcp.c osSpTaskStartGo) posts SP done and DP full sync after this returns (S3c:
+     * one owner of the events); the test counts G_FULLSYNC through port_gfx_stats.fullsyncs */
+    if (gfx_saw_fullsync) port_gfx_stats.fullsyncs++;
 }

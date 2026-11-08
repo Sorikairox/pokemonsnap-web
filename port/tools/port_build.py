@@ -383,7 +383,8 @@ def main():
 
     # phase 5: PC layer (native)
     pc_srcs = sorted(f'port/ultra/{f}' for f in os.listdir('port/ultra') if f.endswith('.c')) + \
-        sorted(f'port/boot/{f}' for f in os.listdir('port/boot') if f.endswith('.c'))
+        sorted(f'port/boot/{f}' for f in os.listdir('port/boot') if f.endswith('.c')) + \
+        sorted(f'port/gfx/{f}' for f in os.listdir('port/gfx') if f.endswith('.c'))   # S3c: the renderer
     ovl_secs = sorted({meta[s][1] for s, msg in status.items() if meta[s][1] != '-' and 'ovlglob=' in msg})
     segtab_c = gen_segments(ovl_secs)
     import icall_gen
@@ -422,8 +423,9 @@ def main():
         '-sSTACK_SIZE=1MB', '-sASYNCIFY', '-sASYNCIFY_STACK_SIZE=65536', '-sMODULARIZE=1',
         '-sEXPORT_NAME=createPokemonSnap', '-sINVOKE_RUN=0', '-sEXIT_RUNTIME=0', '-sENVIRONMENT=worker,node',
         '-sERROR_ON_UNDEFINED_SYMBOLS=1', '-sEXPORTED_FUNCTIONS=_main,_malloc,_free,_port_set_rom,_port_stub_report,_port_vi_retrace,_port_set_pad,'
-        '_port_flash_image,_port_flash_generation',
+        '_port_flash_image,_port_flash_generation,_port_gfx_log_stats,_port_gfx_set_log_ops',
         '-sEXPORTED_RUNTIME_METHODS=HEAPU8,HEAP32,callMain', '--profiling-funcs',
+        '--js-library', 'port/gfx/gfx_gl.js', '-sMAX_WEBGL_VERSION=2', '-sMIN_WEBGL_VERSION=2',   # S3c: renderer
         '-Wl,--error-limit=0', f'-Wl,-Map={OUT}/pokemonsnap.map']
     rc, so, se = run(link)
     open(f'{OUT}/link_log.txt', 'w').write(se)

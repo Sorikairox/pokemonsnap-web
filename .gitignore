@@ -38,3 +38,6 @@ port_work/
 
 # wasm port build output (port/tools/port_build.py)
 port/build/
+
+# agent worktrees (Claude Code)
+.claude/

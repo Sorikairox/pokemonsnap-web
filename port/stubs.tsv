@@ -1,13 +1,19 @@
 # kind	name	signature / address	referenced by   (port/tools/gen_stubs.py: every symbol the wasm link needs that no port object defines; names only)
 libc	abort	emscripten libc (host byte order: check before use on game memory)	port/ultra/pc_os
+libc	acosf	emscripten libc (host byte order: check before use on game memory)	port/gfx/gfx_rsp
 libc	atoi	emscripten libc (host byte order: check before use on game memory)	port/boot/main
-libc	free	emscripten libc (host byte order: check before use on game memory)	port/ultra/pc_mem
-libc	malloc	emscripten libc (host byte order: check before use on game memory)	port/ultra/pc_mem
+libc	fmaxf	emscripten libc (host byte order: check before use on game memory)	port/gfx/gfx_rdp
+libc	fminf	emscripten libc (host byte order: check before use on game memory)	port/gfx/gfx_rdp
+libc	free	emscripten libc (host byte order: check before use on game memory)	port/gfx/gfx_rdp (+1)
+libc	lrintf	emscripten libc (host byte order: check before use on game memory)	port/gfx/gfx_rsp
+libc	malloc	emscripten libc (host byte order: check before use on game memory)	port/gfx/gfx_rdp (+1)
 libc	qsort	emscripten libc (host byte order: check before use on game memory)	port/ultra/pc_icall
+libc	snprintf	emscripten libc (host byte order: check before use on game memory)	port/gfx/gfx_rdp
 libc	stderr	emscripten libc (host byte order: check before use on game memory)	port/ultra/pc_mem
 libc	strcmp	emscripten libc (host byte order: check before use on game memory)	port/boot/main (+2)
 libc	strtol	emscripten libc (host byte order: check before use on game memory)	port/boot/main
 libc	vfprintf	emscripten libc (host byte order: check before use on game memory)	port/ultra/pc_mem
+libc	vsnprintf	emscripten libc (host byte order: check before use on game memory)	port/gfx/gfx_rsp
 mirror-label	D_800AC0F0	0x800AC0F0 size 0x4	src/app_render/47380
 mirror-label	D_800AC0F4	0x800AC0F4 size 0x2C	src/app_render/47380
 mirror-label	D_800ACD9C	0x800ACD9C size 0x68	src/app_render/47380
@@ -2186,4 +2192,4 @@ mirror-label	zubat_model_VRAM	0x80344780 size 0x0	src/app_render/46270
 mirror-label	zubat_model_hd_VRAM	0x803AA700 size 0x0	src/app_render/46270
 mirror-label-of-function	aspMainTextStart	0x8003D980 (function address taken as data)	src/sys/audio
 mirror-label-of-function	gspF3DEX2_NoN_fifoTextStart	0x8003E7A0 (function address taken as data)	src/sys/gtl
-mirror-label-of-function	gspL3DEX2_fifoTextStart	0x8003FB30 (function address taken as data)	src/sys/gtl
+mirror-label-of-function	gspL3DEX2_fifoTextStart	0x8003FB30 (function address taken as data)	port/gfx/gfx_rsp (+1)
