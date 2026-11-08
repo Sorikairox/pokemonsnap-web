@@ -31,6 +31,34 @@ typedef struct UnkBigBoy {
         /* 0x034 */ s32 unk_34[7];
         /* 0x050 */ s32 unk_50;
         /* 0x054 */ PlayerName playerName;
+#ifdef PORT /* wasm port: bitfields LSB first (IDO allocates from the MSB; include/common_structs.h). These two
+         * words are saved to the flash: the image must hold the bits where the console puts them (docs/port/SAVE.md) */
+        /* 0x064 */ u32 unk_64_00 : 1;
+        /* ----- */ u32 invertedY : 1;
+        /* ----- */ u32 zoomSwitch : 1;
+        /* ----- */ u32 unk_64_03 : 1;
+        /* ----- */ u32 unk_64_04 : 1;
+        /* ----- */ u32 unk_64_05 : 1;
+        /* ----- */ u32 unk_64_06 : 1;
+        /* ----- */ u32 hasFinishedTutorial : 1;
+        /* ----- */ u32 unk_64_08 : 1;
+        /* ----- */ u32 unk_64_09 : 1;
+        /* ----- */ u32 hasDashEngine : 1;
+        /* ----- */ u32 unk_64_11 : 1;
+        /* ----- */ u32 unk_64_12 : 1;
+        /* ----- */ u32 hasFlute : 1;
+        /* ----- */ u32 hasPesterBall : 1;
+        /* ----- */ u32 hasApple : 1;
+        /* ----- */ u32 unk_64_16 : 6;
+        /* ----- */ u32 unk_64_22 : 7;
+        /* ----- */ u32 unk_64_29 : 3;
+        /* 0x068 */ u32 unk_68_26 : 27;
+        /* ----- */ u32 unk_68_27 : 1;
+        /* ----- */ u32 unk_68_28 : 1;
+        /* ----- */ u32 unk_68_29 : 1;
+        /* ----- */ u32 unk_68_30 : 1;
+        /* ----- */ u32 unk_68_31 : 1;
+#else
         /* 0x064 */ u32 unk_64_29 : 3;
         /* ----- */ u32 unk_64_22 : 7;
         /* ----- */ u32 unk_64_16 : 6;
@@ -56,6 +84,7 @@ typedef struct UnkBigBoy {
         /* ----- */ u32 unk_68_28 : 1;
         /* ----- */ u32 unk_68_27 : 1;
         /* ----- */ u32 unk_68_26 : 27;
+#endif
         /* 0x06C */ s32 unk_6C[69];
         /* 0x180 */ PhotoData unk_180[69];
         /* 0xFBA0 */ PhotoData unk_FBA0[4];
