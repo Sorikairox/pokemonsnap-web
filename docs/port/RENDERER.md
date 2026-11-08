@@ -25,16 +25,24 @@ Code: `port/gfx/` (`gfx.h` interface, `gfx_rsp.c` display lists + RSP, `gfx_rdp.
   `G_MW_MATRIX` / `G_MV_MATRIX`), viewport, 64-entry vertex buffer (transform, lighting with up to 7 directional
   lights + ambient, texgen, fog factor into shade alpha), back/front culling in NDC, `G_CULLDL`, `G_BRANCH_Z`,
   `G_MODIFYVTX`, DL call/branch/end (stack 32). Vertices leave as clip-space positions with the N64 viewport folded
-  in, so the GPU clips.
+  in, so the GPU clips; a triangle with a vertex at w <= 0 or in front of the near plane is first clipped on the CPU
+  against the colour image's four side planes, like F3DEX2_NoN (R1, below). RSP state is reset per task (segments,
+  matrices, geometry mode; R1: the othermode copy too).
 - **RDP on WebGL2** (`gfx_rdp.c`): othermode, combiner, colours, scissor, tiles, byte-exact 4 KiB TMEM (LoadBlock
   with dxt odd-line swaps, LoadTile, LoadTLUT quadrupled, RGBA32 bank split; the sampler reads back with the same
   odd-row swap). Tiles decode to RGBA8 textures (RGBA16/32, CI4/CI8 with RGBA16/IA16 TLUT, IA4/8/16, I4/8, YUV16),
-  cached by a hash of the TMEM bytes + descriptor (1024 entries). Wrap/mirror/clamp by mask → GL wrap modes.
+  cached by a hash of the TMEM bytes + descriptor (1024 entries). Wrap/mirror/clamp by mask → GL wrap modes, set on
+  every bind from the tile (sampler state, not part of the cached texture: R1).
+- **Othermode = the RSP's copy (R1)**: `G_SETOTHERMODE_H/L` merge into the RSP's DMEM copy and the RDP gets the whole
+  word; the copy is reloaded from the microcode's data segment (offset 0xC8: `EF080CFF 00000000` in Snap's F3DEX2_NoN
+  and L3DEX2 data, read from `OSTask.ucode_data` / the `G_LOAD_UCODE` data at run time) at every task start and
+  ucode load. `G_RDPSETOTHERMODE` sets both.
 - **Shaders**: one generated GLSL program per (combine, blender bits, cycle type, flags). Two combiner cycles with
   all N64 inputs (NOISE, K4/K5, PRIM_LOD_FRAC; LOD_FRACTION = 0); the blender's first cycle and any cycle without
   memory are evaluated in the shader (fog: `FOG, SHADE_A, IN, 1MA`), a last cycle reading memory with `FORCE_BL`
   maps to GL blending (`SRC_ALPHA, f(B)`). Alpha compare (threshold / dither), `CVG_X_ALPHA + ALPHA_CVG_SEL`
-  (texture edge, 0.5), Z compare/update/decal (polygon offset), primitive depth. FILL rectangles = flat quads of
+  (texture edge, 0.5), Z compare/update/decal (polygon offset), primitive depth (`z / 32` is a screen z, mapped
+  through the current viewport like a vertex: the game's own units, app_render/47380.c). FILL rectangles = flat quads of
   the fill colour; COPY rectangles = point-sampled texel copies (dsdx / 4, inclusive lower-right).
 - **Batches**: triangles accumulate while the RDP state is unchanged; any state command flushes.
 
@@ -125,7 +133,9 @@ is deterministic (same PNG hashes run to run); node gives the same `[task]` hash
 test RDRAM; `-sGLOBAL_BASE=256MB` so the address classes match the game), serves it on 127.0.0.1, runs the host's
 Chrome headless (SwiftShader, muted) over the DevTools protocol (`test/cdp.mjs`, node's built-in WebSocket), and
 writes `log.txt` (CHECK lines), `shown.png` / `shown2.png` (canvas) and `rdram.png` / `rdram2.png` (RDRAM after
-write-back) to `port/build/gfx_test/out/` (gitignored). Two tasks, 18 checks (S6: `z_writeback`, a 64x48 Z image in the console format + its COPY into a colour image): SP/DP events, culling, no unknown
+write-back) to `port/build/gfx_test/out/` (gitignored). Two tasks, 22 checks (S6: `z_writeback`, a 64x48 Z image in
+the console format + its COPY into a colour image; R1: `tile_resize_wrap`, `eye_plane_vertex`, `othermode_per_task`,
+`prim_depth_units`, each failing without its fix): SP/DP events, culling, no unknown
 opcodes / bad addresses, the detector's LoadTile + COPY into an 8-wide image equals the frame centre (64/64),
 FILL, Z buffer, a 64-wide image with its own Z copied back via LoadBlock in the same task, CI4 + TLUT + alpha
 compare, RGBA16 wrap, RGBA32, IA16, I4, mirror, 2-cycle TEXEL0/TEXEL1, matrix push/mul/pop, `gSPMvpRecalc` +
@@ -136,14 +146,37 @@ compare, RGBA16 wrap, RGBA32, IA16, I4, mirror, 2-cycle TEXEL0/TEXEL1, matrix pu
 - Positional lights (`G_LIGHTING_POSITIONAL`), texture LOD / mipmaps / detail (`G_TL_LOD`, LOD_FRACTION = 0),
   chroma key, dithering, coverage/AA, the 3-point bilinear filter (GL bilinear is used), YUV combiner path (YUV is
   converted at decode with the SetConvert K0..K3; K4/K5 are passed to the combiner), texgen scale checked only by
-  reasoning, L3DEX2 line width formula approximate, NoN (no near clipping: GL clips at near; WebGL has no depth
-  clamp), the 16-bit Z format (clears map 0xFFFC → far linearly), `G_BRANCH_Z` threshold units untested.
+  reasoning, L3DEX2 line width formula approximate, NoN: side planes done (R1), but what is nearer than the near
+  plane is still removed by GL (the console draws it with a clamped Z; WebGL has no depth clamp), the 16-bit Z format
+  (clears map 0xFFFC → far linearly). `G_BRANCH_Z` (R1): the thresholds are `G_DEPTOZS` values for near 10 / far 25600
+  (Beach: high detail below ~600 units, low detail to ~4470, nothing beyond); the renderer's screen z of the
+  reference vertex matches that formula exactly, so the LOD choice follows the game's design.
+- Clamp + mask with a tile larger than the mask (Beach cliffs: mask 64, tile 512x128, clamp bits): GL repeats
+  forever; the RDP clamps at the tile edge. Only texels outside the tile differ (not seen on the route).
+- Gouraud shade is interpolated perspective-correct by GL; the RDP interpolates it linearly in screen space (GLSL ES
+  3.00 has no `noperspective`). Small on ordinary triangles; not emulated.
+- RDP state that the console keeps across tasks while the port does not (or the reverse) is only checked for
+  othermode (R1). Other DMEM state is reset by `rsp_reset` each task.
 - CPU writes into an image that still has GPU-dirty rows (only partly written back) are not detected or uploaded;
   Snap's red dot follows a full-frame `osInvalDCache`, so it is not affected.
 - Z values are the console's format by construction (linear depth → 18-bit z → compressed); not compared with a
   console capture. dz is always 0.
 - Performance: no measurement yet on real frames; per-draw uniform uploads; texture hash per tile change.
-- Seen on real frames (S3c): every texture rectangle is its own draw (a texture load between rectangles sets
-  `state_dirty`): ~8000 draws per 150 retraces on the menus; fine on SwiftShader (5.6 ms per retrace for the whole
-  game), batch across loads when phones need it. The intro's mist strip (IA8, XLU, alpha = TEXEL0) has hard right /
-  bottom edges: not verified against a console capture.
+- Seen on real frames (S3c): every texture rectangle preceded by a texture load is its own draw (rectangles that
+  share a load are batched): ~8000 draws per 150 retraces on the menus; fine on SwiftShader (5.6 ms per retrace for
+  the whole game). Batching across loads needs a texture atlas or array (not done; measure on phones first).
+
+## Session R1 (renderer fixes; notes: `docs/port/notes/R1.md`)
+
+| Seen | Root cause (evidence) | Fix |
+|---|---|---|
+| Beach cliffs, end tunnel flat grey | a CI4 64x64 texture drawn first with a 64x64 tile (clamp), then with a 512x128 tile size over the same TMEM; the tile fast path returned the CLAMP texture: every texel past 64 = the edge column (probe: bound texture wrap `0x812F`, s 376..436) | wrap modes per bind |
+| lighter rectangles in the sky's top corners | background mesh vertices at w = 0 (z < -w); GL near-clipped them into w ~ 10 vertices far off screen and SwiftShader filled the strips with one texel and one shade (projective t should go 29 → 6) | CPU side-plane clipping (F3DEX2_NoN) |
+| darker left band on Oak's check (x < 232 canvas) | intended: photo_check/98C330.c `func_801DE02C` slides the "black square" sprite (width 132, alpha 128) to x = -12: 450 XLU rectangles of prim alpha 0x80 over x 0..116 | none |
+| intro "mist strip" with hard right / bottom edges | a fogged IA8 bush billboard (alpha opaque at s = 0, t = 0: its polygon edges) far behind the hill was drawn over it: the UI's `G_ZS_PRIM` of the previous task leaked (render modes only set the upper 29 bits), so **every world triangle used the primitive depth** | RSP othermode copy reloaded per task / ucode load |
+| (uncovered by the above) | primitive depth mapped `z / 32767` while vertices map screen z / 1022: up to 2 screen-z units nearer | `z / 32` through the viewport |
+
+Debug tool: `port_gfx_set_probe(x, y)` (up to 4 points, `x < 0` clears) logs, while `--logops` is on, every
+triangle (homogeneous test: triangles crossing w = 0 included) and texture rectangle covering that N64 pixel, with
+its vertices and the RDP state. Not exported yet: add `_port_gfx_set_probe` to port_build.py's EXPORTED_FUNCTIONS
+and a `cfg.probe` to port/web/worker.js (owned by other sessions).

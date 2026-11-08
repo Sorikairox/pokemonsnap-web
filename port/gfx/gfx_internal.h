@@ -67,9 +67,11 @@ typedef struct {
 /* RSP state the RDP side needs */
 extern uint32_t gfx_geom;                 /* geometry mode */
 extern int gfx_tex_on, gfx_tex_tile, gfx_tex_level;
+float gfx_prim_depth_ndc(unsigned z);   /* G_SETPRIMDEPTH z -> NDC z with the current viewport (R1) */
 
 /* ------------------------------------------------------------------ RDP side (gfx_rdp.c) */
 void rdp_reset_task(void);
+void rdp_ucode_data(const unsigned char *data);   /* a microcode's data segment was loaded into DMEM (task start, G_LOAD_UCODE) */
 void rdp_cmd(uint32_t w0, uint32_t w1, const uint32_t *next); /* an RDP command (0xE4..0xFF etc.); next = following words */
 void rdp_tri(const GfxVtx *a, const GfxVtx *b, const GfxVtx *c);
 void rdp_line(const GfxVtx *a, const GfxVtx *b, float width);
@@ -78,6 +80,7 @@ void rdp_end_task(void);
 int rdp_gl_ready(void);
 int rdp_target_width(void), rdp_target_height(void);
 extern int gfx_saw_fullsync;
+extern int gfx_log_ops;   /* port_gfx_set_log_ops: log every command (debug) */
 
 void gfx_log_once(unsigned key, const char *fmt, ...) __attribute__((format(printf, 2, 3)));
 #endif

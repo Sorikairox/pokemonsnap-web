@@ -14,7 +14,7 @@
 PortGfxStats port_gfx_stats;
 uint32_t gfx_geom;
 int gfx_tex_on, gfx_tex_tile, gfx_tex_level;
-static int log_ops;
+int gfx_log_ops;
 
 /* ------------------------------------------------------------------ logging */
 static uint32_t once_keys[512];
@@ -32,7 +32,7 @@ void gfx_log_once(unsigned key, const char *fmt, ...) {
     va_end(ap);
     port_log("[gfx] %s\n", buf);
 }
-void port_gfx_set_log_ops(int on) { log_ops = on; }
+void port_gfx_set_log_ops(int on) { gfx_log_ops = on; }
 
 /* ------------------------------------------------------------------ addresses
  * Address classes in this port (-sGLOBAL_BASE=256MB, the RDRAM mirror at wasm 0x10800000, MEMORY.md):
@@ -123,6 +123,13 @@ static float fog_mul, fog_off;
 static float tex_scale_s = 1, tex_scale_t = 1;
 static uint32_t rdphalf1;
 static int ucode_l3dex2;
+
+/* G_SETPRIMDEPTH z (15 bits) as NDC z: the game computes it as the screen z the RSP would give a vertex there, times
+ * 32 (app_render/47380.c, effect.c: sz = ndc * vscale[2] + vtrans[2]; gDPSetPrimDepth(sz * 32)) */
+float gfx_prim_depth_ndc(unsigned z) {
+    float n = vp_sz != 0 ? ((float)(z & 0x7FFF) / 32.0f - vp_tz) / vp_sz : 0;
+    return n < -1 ? -1 : n > 1 ? 1 : n;
+}
 
 static GfxVtx vbuf[64];
 static float vndc[64][3];      /* NDC x, y (y up) and w for culling / branch z */
@@ -339,7 +346,7 @@ static void run_dl(uint32_t start) {
         uint32_t w0 = vbe_ld32(pc), w1 = vbe_ld32(pc + 1);
         unsigned op = w0 >> 24;
         port_gfx_stats.cmds++;
-        if (log_ops) port_log("[gfx] %p %08X %08X\n", (const void *)pc, w0, w1);
+        if (gfx_log_ops) port_log("[gfx] %p %08X %08X\n", (const void *)pc, w0, w1);
         pc += 2;
         switch (op) {
         case 0x00: break;   /* G_NOOP */
@@ -351,7 +358,7 @@ static void run_dl(uint32_t start) {
             if (i < 64) {
                 const GfxVtx *v = &vbuf[i];
                 float zs = (v->w != 0 ? v->z / v->w : 0) * vp_sz + vp_tz;
-                if (log_ops) port_log("[gfx] branch_z v%u x %f y %f z %f w %f -> screen z %f vs %f (vp z %f %f)\n", i,
+                if (gfx_log_ops) port_log("[gfx] branch_z v%u x %f y %f z %f w %f -> screen z %f vs %f (vp z %f %f)\n", i,
                                       v->x, v->y, v->z, v->w, zs, w1 / 65536.0f, vp_sz, vp_tz);
                 if (zs * 65536.0f <= (float)w1 || v->w <= 0) {
                     const uint32_t *t = (const uint32_t *)gfx_addr(rdphalf1);
@@ -403,6 +410,7 @@ static void run_dl(uint32_t start) {
         case 0xDD:   /* G_LOAD_UCODE: w1 = text, rdphalf1 = data */
             port_gfx_stats.ucode_loads++;
             ucode_l3dex2 = is_l3dex2(w1);
+            rdp_ucode_data(rdphalf1 ? gfx_addr(rdphalf1) : 0);
             break;
         case 0xDE: {
             const uint32_t *t = (const uint32_t *)gfx_addr(w1);
@@ -452,6 +460,7 @@ void port_gfx_run_dl(const void *dl, int l3dex2) {
     port_gfx_init();
     rsp_reset();
     rdp_reset_task();
+    rdp_ucode_data(0);
     ucode_l3dex2 = l3dex2;
     run_dl((uint32_t)(uintptr_t)dl);
     rdp_end_task();
@@ -466,6 +475,7 @@ void port_gfx_task(void *task) {
     if (type == 1) {   /* M_GFXTASK */
         rsp_reset();
         rdp_reset_task();
+        { uint32_t ud = vbe_ld32(t + 6); rdp_ucode_data(ud ? gfx_addr(ud) : 0); }   /* OSTask.ucode_data (0x18) */
         heap_top = (uint32_t)emscripten_get_heap_size();
         ucode_l3dex2 = is_l3dex2(ucode);
         run_dl(data);

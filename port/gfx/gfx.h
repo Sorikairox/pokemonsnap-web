@@ -33,12 +33,14 @@ void port_gfx_run_dl(const void *dl, int ucode_l3dex2);  /* interpret one list (
 void port_gfx_flush(void);                                /* submit pending draws */
 void port_gfx_resolve_all(void);                          /* every GPU-drawn colour image -> RDRAM */
 void port_gfx_set_log_ops(int on);                        /* log every command (debug) */
+void port_gfx_set_probe(int x, int y);                    /* with log_ops: log primitives covering N64 pixel (x, y) */
 void port_gfx_log_stats(void);                            /* log the counters since the last call (gfx_port.c) */
 
 typedef struct {
     unsigned tasks, dls, cmds, tris, lines, rects, fills, draws, verts, tex_decodes, tex_hits, unknown_ops;
     unsigned resolves, resolve_px, uploads, upload_px, ucode_loads, bad_addr, culled, presents, fullsyncs;
     unsigned zresolves, zresolve_px, zuploads, zclears;   /* Z images (S6) */
+    unsigned clipped;                                    /* triangles clipped on the CPU (R1: NoN side planes) */
 } PortGfxStats;
 extern PortGfxStats port_gfx_stats;
 

@@ -528,6 +528,10 @@ static void tile_dims(const Tile *tl, int *w, int *h, GLint *ws, GLint *wt) {
 static uint32_t tile_desc(const Tile *tl) {
     return tl->fmt | tl->siz << 3 | tl->line << 5 | tl->tmem << 14 | tl->palette << 23 | tlut_mode() << 27 | tl->cms << 29;
 }
+/* the decoded texels of tile ti (w x h, from tile_dims). Wrap / mirror / clamp are sampler state, set by the caller at
+ * every bind: one decoded texture serves tiles that differ only in their size or clamp bits (R1: the Beach cliffs set
+ * a 64x64 tile size, load, then a 512x128 one over the same TMEM; the texture made for the first, clamped, was reused
+ * by the fast path below for the second and every texel past the first 64 sampled the edge column: flat grey) */
 static GLuint tile_texture(int ti, int *pw, int *ph) {
     Tile *tl = &tiles[ti & 7];
     int w, h;
@@ -547,7 +551,7 @@ static GLuint tile_texture(int ti, int *pw, int *ph) {
         for (unsigned i = 0; i < pn; i += 8) { hsh ^= tmem[(p0 + i) & 0xFFF] << 8 | tmem[(p0 + i + 1) & 0xFFF]; hsh *= 16777619u; }
     }
     if (tl->fmt == FMT_YUV) { for (int k = 0; k < 4; k++) { hsh ^= (uint32_t)conv_k[k]; hsh *= 16777619u; } }
-    uint32_t key[4] = {hsh, desc, (uint32_t)w | (uint32_t)h << 16, (uint32_t)ws << 16 ^ (uint32_t)wt ^ tl->cmt << 30};
+    uint32_t key[4] = {hsh, desc, (uint32_t)w | (uint32_t)h << 16, 0};
     unsigned slot = (hsh ^ desc * 31u) % TEX_CACHE;
     TexEnt *victim = 0;
     for (unsigned probe = 0; probe < 8; probe++) {
@@ -571,8 +575,6 @@ static GLuint tile_texture(int ti, int *pw, int *ph) {
     glBindTexture(GL_TEXTURE_2D, tex);
     glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, px);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, ws);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, wt);
     free(px);
     memcpy(victim->key, key, sizeof key);
     victim->tex = tex; victim->w = w; victim->h = h; victim->stamp = ++tex_clock;
@@ -1134,7 +1136,7 @@ static int begin_batch(int kind, int tile) {
         c[0] = (f >> 11) / 31.0f; c[1] = ((f >> 6) & 31) / 31.0f; c[2] = ((f >> 1) & 31) / 31.0f; c[3] = f & 1;
         glUniform4f(p->u_fill, c[0], c[1], c[2], c[3]);
     }
-    float zp = (prim_depth >> 16 & 0x7FFF) / 32767.0f;
+    float zp = gfx_prim_depth_ndc(prim_depth >> 16) * 0.5f + 0.5f;   /* GL depth, like a vertex at that screen z */
     glUniform4f(p->u_misc, (conv_k[4] & 0x1FF) / 255.0f, (conv_k[5] & 0x1FF) / 255.0f, prim_lod_frac / 255.0f, zp);
     /* blending: the last blender cycle reads memory and FORCE_BL */
     unsigned last = cyc == CYC_2 ? 1 : 0;
@@ -1152,6 +1154,13 @@ static int begin_batch(int kind, int tile) {
         glActiveTexture(GL_TEXTURE0 + u);   /* before tile_texture: a new texture is created on the active unit */
         GLuint tex = tile_texture(ti, &w, &h);
         glBindTexture(GL_TEXTURE_2D, tex);
+        {
+            int dw, dh;
+            GLint ws, wt;
+            tile_dims(&tiles[ti & 7], &dw, &dh, &ws, &wt);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, ws);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, wt);
+        }
         unsigned filt = (om_h >> OMH_TEXTFILT_SFT) & 3;
         GLint f = (cyc == CYC_COPY || filt == 0) ? GL_NEAREST : GL_LINEAR;
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, f);
@@ -1182,9 +1191,122 @@ static void put_vtx(float x, float y, float z, float w, const float *col, float 
     batch_n++;
 }
 
+/* debug (port_gfx_set_probe): while commands are logged, every primitive covering the probe pixel (N64 pixels of the
+ * current colour image) is logged with the state it is drawn with */
+static float probe_pt[4][2];
+static int probe_n;
+void port_gfx_set_probe(int x, int y) {
+    if (x < 0) { probe_n = 0; return; }
+    if (probe_n < 4) { probe_pt[probe_n][0] = (float)x + 0.5f; probe_pt[probe_n][1] = (float)y + 0.5f; probe_n++; }
+}
+static void probe_state(void) {
+    for (int i = 0; i < 8; i++) {
+        const Tile *tl = &tiles[i];
+        port_log("[probe]   tile %d fmt %u siz %u line %u tmem %u pal %u cms %u masks %u shifts %u cmt %u maskt %u shiftt %u "
+                 "(%.2f,%.2f)-(%.2f,%.2f)\n", i, tl->fmt, tl->siz, tl->line, tl->tmem, tl->palette, tl->cms, tl->masks,
+                 tl->shifts, tl->cmt, tl->maskt, tl->shiftt, tl->uls / 4.0, tl->ult / 4.0, tl->lrs / 4.0, tl->lrt / 4.0);
+    }
+    port_log("[probe]   omh %08X oml %08X cc %08X %08X prim %08X env %08X fog %08X geom %08X tex on %d tile %d lvl %d\n",
+             om_h, om_l, cc_w0, cc_w1, prim_color, env_color, fog_color, gfx_geom, gfx_tex_on, gfx_tex_tile, gfx_tex_level);
+}
+static void probe_tri(const GfxVtx *v[3]) {
+    if (!probe_n || !gfx_log_ops) return;
+    /* homogeneous 2D rasterisation (no clipping needed): e_i = (v_j x v_k) . (px, py, 1), inside when all e_i have
+     * the sign of det = v_0 . (v_1 x v_2) */
+    double V[3][3], c[3][3], det;
+    for (int i = 0; i < 3; i++) { V[i][0] = v[i]->x; V[i][1] = v[i]->y; V[i][2] = v[i]->w; }
+    for (int i = 0; i < 3; i++) {
+        const double *a = V[(i + 1) % 3], *b = V[(i + 2) % 3];
+        c[i][0] = a[1] * b[2] - a[2] * b[1]; c[i][1] = a[2] * b[0] - a[0] * b[2]; c[i][2] = a[0] * b[1] - a[1] * b[0];
+    }
+    det = c[0][0] * V[0][0] + c[0][1] * V[0][1] + c[0][2] * V[0][2];
+    if (det == 0) return;
+    for (int k = 0; k < probe_n; k++) {
+        int in = 1;
+        for (int i = 0; i < 3 && in; i++) in = (c[i][0] * probe_pt[k][0] + c[i][1] * probe_pt[k][1] + c[i][2]) / det >= 0;
+        if (!in) continue;
+        port_log("[probe] (%d,%d) tri hit (cimg %p w %u)\n", (int)probe_pt[k][0], (int)probe_pt[k][1], (void *)cimg.addr, cimg.width);
+        for (int i = 0; i < 3; i++)
+            port_log("[probe]   v%d scr %.2f %.2f z/w %.6f w %.2f (x %.3f y %.3f z %.3f) rgba %.3f %.3f %.3f %.3f st %.2f %.2f\n", i,
+                     v[i]->x / v[i]->w, v[i]->y / v[i]->w, v[i]->z / v[i]->w, v[i]->w, v[i]->x, v[i]->y, v[i]->z, v[i]->r,
+                     v[i]->g, v[i]->b, v[i]->a, v[i]->s, v[i]->t);
+        probe_state();
+    }
+}
+static void probe_rect(float x0, float y0, float x1, float y1, float s, float t, float dsdx, float dtdy) {
+    if (!gfx_log_ops) return;
+    for (int k = 0; k < probe_n; k++) {
+        float px = probe_pt[k][0], py = probe_pt[k][1];
+        if (px < x0 || px >= x1 || py < y0 || py >= y1) continue;
+        port_log("[probe] (%d,%d) rect hit (cimg %p w %u) (%.2f,%.2f)-(%.2f,%.2f) st %.2f %.2f d %.4f %.4f\n", (int)px, (int)py,
+                 (void *)cimg.addr, cimg.width, x0, y0, x1, y1, s, t, dsdx, dtdy);
+        probe_state();
+    }
+}
+
+/* A triangle with a vertex on or behind the eye plane (w <= 0) or in front of the near plane (z < -w), handed to GL
+ * as is, is clipped by GL at the near plane: the new vertices have a tiny w, project tens of thousands of pixels off
+ * screen and, at least on SwiftShader, the attributes inside come out wrong (R1: Beach sky box, retrace 3801: the
+ * background mesh has vertices at w = 0 exactly; the strips next to them took one texel and one shade, the "lighter
+ * rectangles" in the top corners, where the projective interpolation varies t from 29 to 6).
+ * The game's microcode (F3DEX2_NoN, gtl.c) clips against the four side planes only (the game sets a clip ratio of 1:
+ * gSPClipRatio(FRUSTRATIO_1), G_MW_CLIP words 1 / -1), never at the near plane. Do the same here for those triangles:
+ * clip against the side planes of the colour image (Sutherland-Hodgman in homogeneous space, attributes interpolated
+ * linearly in the clip parameter like the RSP's clipper), then hand GL a fan whose vertices all have w > 0 and lie on
+ * the image. Depth is left as computed (GL still removes what is nearer than the near plane; the console would draw
+ * it with a clamped Z: not emulated). Returns 1 when the triangle was handled here. */
+static int clip_tri_sides(const GfxVtx *v[3]) {
+    int need = 0;
+    for (int i = 0; i < 3; i++) need |= !(v[i]->w > 0) || v[i]->z < -v[i]->w;
+    if (!need) return 0;
+    enum { NF = sizeof(GfxVtx) / sizeof(float) };
+    float W = (float)cur_target->width, H = (float)cur_target->height;
+    float poly[2][9][NF];
+    int n = 3, cur = 0;
+    for (int i = 0; i < 3; i++) memcpy(poly[0][i], v[i], sizeof(GfxVtx));
+    for (int plane = 0; plane < 4 && n > 0; plane++) {
+        float (*in)[NF] = poly[cur], (*out)[NF] = poly[cur ^ 1];
+        int m = 0;
+        for (int i = 0; i < n; i++) {
+            const float *p = in[i], *q = in[(i + 1) % n];
+            /* distance to the plane: >= 0 inside. x, y are N64 pixels * w: 0 <= x <= W w, 0 <= y <= H w */
+            float dp, dq;
+            switch (plane) {
+            case 0: dp = p[0]; dq = q[0]; break;                       /* x >= 0 */
+            case 1: dp = W * p[3] - p[0]; dq = W * q[3] - q[0]; break; /* x <= W w */
+            case 2: dp = p[1]; dq = q[1]; break;                       /* y >= 0 */
+            default: dp = H * p[3] - p[1]; dq = H * q[3] - q[1]; break;
+            }
+            if (dp >= 0 && m < 9) memcpy(out[m++], p, sizeof(GfxVtx));
+            if ((dp >= 0) != (dq >= 0) && m < 9) {
+                float t = dp / (dp - dq);
+                for (int k = 0; k < NF; k++) out[m][k] = p[k] + (q[k] - p[k]) * t;
+                m++;
+            }
+        }
+        n = m;
+        cur ^= 1;
+    }
+    if (n < 3) return 1;
+    float (*pv)[NF] = poly[cur];
+    for (int i = 0; i < n; i++) if (!(pv[i][3] > 0)) return 1;   /* only the eye point itself is left: nothing to draw */
+    if (batch_n + 3 * (n - 2) > MAX_BATCH_VERTS) flush();
+    float y0 = 1e9f, y1 = -1e9f;
+    for (int i = 1; i + 1 < n; i++) {
+        const float *f[3] = {pv[0], pv[i], pv[i + 1]};
+        for (int k = 0; k < 3; k++) put_vtx(f[k][0], f[k][1], f[k][2], f[k][3], &f[k][4], f[k][8], f[k][9]);
+    }
+    for (int i = 0; i < n; i++) { float y = pv[i][1] / pv[i][3]; y0 = fminf(y0, y); y1 = fmaxf(y1, y); }
+    mark_rows(y0, y1);
+    port_gfx_stats.clipped++;
+    return 1;
+}
+
 void rdp_tri(const GfxVtx *a, const GfxVtx *b, const GfxVtx *c) {
     if (!begin_batch(0, 0)) return;
+    { const GfxVtx *pv[3] = {a, b, c}; probe_tri(pv); }
     const GfxVtx *v[3] = {a, b, c};
+    if (clip_tri_sides(v)) return;
     for (int i = 0; i < 3; i++) put_vtx(v[i]->x, v[i]->y, v[i]->z, v[i]->w, &v[i]->r, v[i]->s, v[i]->t);
     if (a->w > 0 && b->w > 0 && c->w > 0) {
         float ya = a->y / a->w, yb = b->y / b->w, yc = c->y / c->w;
@@ -1210,7 +1332,7 @@ void rdp_line(const GfxVtx *a, const GfxVtx *b, float width) {
 
 static void quad(float x0, float y0, float x1, float y1, float s0, float t0, float s1, float t1, int flip) {
     static const float black[4] = {0, 0, 0, 0};
-    float z = ((prim_depth >> 16 & 0x7FFF) / 32767.0f) * 2.0f - 1.0f;
+    float z = gfx_prim_depth_ndc(prim_depth >> 16);
     /* corners: (x0,y0) (x1,y0) (x1,y1) (x0,y1); flip swaps the s/t directions */
     float cs[4], ct[4];
     if (!flip) { cs[0] = s0; ct[0] = t0; cs[1] = s1; ct[1] = t0; cs[2] = s1; ct[2] = t1; cs[3] = s0; ct[3] = t1; }
@@ -1233,6 +1355,7 @@ void rdp_texrect(uint32_t w0, uint32_t w1, uint32_t w2, uint32_t w3, int flip) {
     if (cyc == CYC_FILL) return;
     if (lrx <= ulx || lry <= uly) return;
     if (!begin_batch(cyc == CYC_COPY ? 2 : 1, tile)) return;
+    probe_rect(ulx, uly, lrx, lry, s, t, dsdx, dtdy);
     float s1, t1;
     if (!flip) { s1 = s + dsdx * (lrx - ulx); t1 = t + dtdy * (lry - uly); }
     else { s1 = s + dsdx * (lry - uly); t1 = t + dtdy * (lrx - ulx); }
@@ -1265,6 +1388,25 @@ void rdp_reset_task(void) {
     cur_target = 0;
     cur_zw = 0;
 }
+
+/* The RSP keeps its own copy of the two othermode words in DMEM: G_SETOTHERMODE_H / _L change bits of that copy and
+ * send the whole result to the RDP (a G_RDPSETOTHERMODE). Loading a microcode (every task start, G_LOAD_UCODE)
+ * reloads DMEM from the ucode's data segment, which holds the copy ready made at offset 0xC8: in Snap's F3DEX2_NoN
+ * and L3DEX2 data both are EF080CFF 00000000 (H: G_TP_PERSP | G_TC_FILT | ..., L: 0 = G_ZS_PIXEL, no alpha compare).
+ * R1: without this reset the depth source of the last task (the UI's gDPSetDepthSource(G_ZS_PRIM)) leaked into the
+ * next frame, whose render modes only set the upper 29 bits: every world triangle was drawn with the primitive depth
+ * (one constant), so far scenery covered nearer scenery (the intro's fogged bush strip over the hill: the "mist" with
+ * hard edges). */
+static uint32_t rsp_om_h = 0x00080CFFu, rsp_om_l;
+void rdp_ucode_data(const unsigned char *data) {
+    uint32_t h = 0xEF080CFFu, l = 0;
+    if (data && in_memory(data + 0xC8, 8) && (vbe_ld32(data + 0xC8) >> 24) == 0xEF) {
+        h = vbe_ld32(data + 0xC8);
+        l = vbe_ld32(data + 0xCC);
+    } else if (data) gfx_log_once(0xC8000000, "ucode data %p: no othermode at 0xC8, defaults used", (const void *)data);
+    rsp_om_h = h & 0x00FFFFFFu;
+    rsp_om_l = l;
+}
 void rdp_end_task(void) {
     rdp_end_task_gl();
     rb_point(1);
@@ -1293,7 +1435,10 @@ void rdp_cmd(uint32_t w0, uint32_t w1, const uint32_t *next) {
     case 0xE2: case 0xE3: {   /* G_SETOTHERMODE_L / _H: 32 - shift - len, len - 1 */
         unsigned len = (w0 & 0xFF) + 1, sft = 32 - ((w0 >> 8) & 0xFF) - len;
         uint32_t mask = (len >= 32 ? 0xFFFFFFFFu : ((1u << len) - 1)) << sft;
-        if (op == 0xE2) om_l = (om_l & ~mask) | (w1 & mask); else om_h = (om_h & ~mask) | (w1 & mask);
+        /* merged into the RSP's copy, which the RDP then receives whole */
+        if (op == 0xE2) rsp_om_l = (rsp_om_l & ~mask) | (w1 & mask); else rsp_om_h = (rsp_om_h & ~mask) | (w1 & mask);
+        om_h = (om_h & 0xFF000000u) | (rsp_om_h & 0x00FFFFFFu);
+        om_l = rsp_om_l;
         state_dirty = 1;
         break;
     }
@@ -1314,7 +1459,11 @@ void rdp_cmd(uint32_t w0, uint32_t w1, const uint32_t *next) {
         state_dirty = 1;
         break;
     case 0xEE: prim_depth = w1; state_dirty = 1; break;
-    case 0xEF: om_h = (om_h & 0xFF000000u) | (w0 & 0x00FFFFFFu); om_l = w1; state_dirty = 1; break;
+    case 0xEF:   /* G_RDPSETOTHERMODE: both words, the RSP's copy too */
+        om_h = (om_h & 0xFF000000u) | (w0 & 0x00FFFFFFu); om_l = w1;
+        rsp_om_h = w0 & 0x00FFFFFFu; rsp_om_l = w1;
+        state_dirty = 1;
+        break;
     case 0xF0: load_tlut(w0, w1); state_dirty = 1; break;
     case 0xF2: {
         Tile *t = &tiles[(w1 >> 24) & 7];

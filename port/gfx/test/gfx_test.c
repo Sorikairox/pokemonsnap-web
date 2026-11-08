@@ -385,6 +385,9 @@ unsigned char *gfx_test_run(void) {
     build_frame(&g);
     build_detector(&g);
     build_small(&g);
+    gDPPipeSync(g++);
+    gDPSetDepthSource(g++, G_ZS_PRIM);   /* like the UI at the end of Snap's frames (R1) */
+    gDPSetPrimDepth(g++, 0, 0);
     gDPFullSync(g++);
     gSPEndDisplayList(g++);
     memset(task, 0, sizeof task);
@@ -498,6 +501,12 @@ unsigned char *gfx_test_run2(void) {
     texrect_1cyc(&g, 110, 10, 32, 32, 1 << 9);
     gDPLoadTextureBlock(g++, 0x06002500, G_IM_FMT_RGBA, G_IM_SIZ_16b, 16, 16, 0, G_TX_MIRROR | G_TX_WRAP, G_TX_CLAMP, 4, G_TX_NOMASK, G_TX_NOLOD, G_TX_NOLOD);
     texrect_1cyc(&g, 160, 10, 64, 16, 1 << 10);   /* 64 texels across a 16-texel mirrored tile */
+    /* R1 (Beach cliffs): the same TMEM drawn first with a 16x16 clamped tile, then with a 64x16 tile size (clamp bit
+     * + mask 16: wraps every 16 texels inside the tile). The second draw must wrap, not reuse the clamped texture */
+    gDPLoadTextureBlock(g++, 0x06002500, G_IM_FMT_RGBA, G_IM_SIZ_16b, 16, 16, 0, G_TX_CLAMP, G_TX_CLAMP, 4, 4, G_TX_NOLOD, G_TX_NOLOD);
+    texrect_1cyc(&g, 160, 110, 16, 16, 1 << 10);
+    gDPSetTileSize(g++, G_TX_RENDERTILE, 0, 0, 63 << 2, 15 << 2);
+    texrect_1cyc(&g, 160, 130, 64, 16, 1 << 10);
     /* 2-cycle: (TEXEL1 - TEXEL0) * ENV_ALPHA + TEXEL0, then * SHADE (white) */
     gDPPipeSync(g++);
     gDPSetCycleType(g++, G_CYC_2CYCLE);
@@ -540,6 +549,71 @@ unsigned char *gfx_test_run2(void) {
     vset(gv, 0, 10, 150, 0, 0, 0, 0x00FF00FF); vset(gv, 1, 10, 190, 0, 0, 0, 0x00FF00FF); vset(gv, 2, 50, 190, 0, 0, 0, 0x00FF00FF);
     gSPVertex(g++, gv, 3, 0);
     gSP1Triangle(g++, 0, 1, 2, 0);
+    /* R1 (Beach sky box): a vertex on the eye plane (w = 0, z < -w). Projection: clip = (x / 160, -y / 120, z - 1, z),
+     * no Z. A = (100, 0, 0) is the point at infinity to the right, B, C at w = 1 project to (230, 100) and (230, 140): the
+     * triangle is the strip x >= 230, 100 <= y <= 140. Shade: A white, B, C black. Projective interpolation at pixel
+     * (x, 120): n = (x + 0.5 - 160) / 160, lambda_A = (n - 0.4375) / 0.625 per unit of w, a = lambda_A / (lambda_A + 1):
+     * 24 at x = 240, 105 at x = 300 (out of 255) */
+    gDPPipeSync(g++);
+    gDPSetCombineMode(g++, G_CC_SHADE, G_CC_SHADE);
+    gSPClearGeometryMode(g++, G_CULL_BACK | G_CULL_FRONT | G_ZBUFFER);
+    ident(m);
+    m[0][0] = 1 / 160.0f; m[1][1] = -1 / 120.0f; m[2][2] = 1; m[3][2] = -1; m[2][3] = 1; m[3][3] = 0;
+    gSPMatrix(g++, mtx(m), G_MTX_PROJECTION | G_MTX_LOAD | G_MTX_NOPUSH);
+    ident(m);
+    gSPMatrix(g++, mtx(m), G_MTX_MODELVIEW | G_MTX_LOAD | G_MTX_NOPUSH);
+    uint32_t *ev = vtx(3);
+    vset(ev, 0, 100, 0, 0, 0, 0, 0xFFFFFFFF); vset(ev, 1, 70, -20, 1, 0, 0, 0x000000FF); vset(ev, 2, 70, 20, 1, 0, 0, 0x000000FF);
+    gSPVertex(g++, ev, 3, 0);
+    gSP1Triangle(g++, 0, 1, 2, 0);
+    /* R1 (othermode per task): task 1 ended with gDPSetDepthSource(G_ZS_PRIM); this task only sets render modes (the
+     * upper 29 bits of othermode L), so the depth source is the microcode's default again (pixel): the far red
+     * triangle drawn after the near green one stays hidden */
+    gDPPipeSync(g++);
+    gDPSetColorImage(g++, G_IM_FMT_RGBA, G_IM_SIZ_16b, 320, K0(Z_PHYS));
+    gDPSetCycleType(g++, G_CYC_FILL);
+    gDPSetRenderMode(g++, G_RM_NOOP, G_RM_NOOP2);
+    gDPSetFillColor(g++, GPACK_ZDZ(G_MAXFBZ, 0) << 16 | GPACK_ZDZ(G_MAXFBZ, 0));
+    gDPFillRectangle(g++, 0, 0, 319, 239);
+    gDPPipeSync(g++);
+    gDPSetColorImage(g++, G_IM_FMT_RGBA, G_IM_SIZ_16b, 320, K0(FB2_PHYS));
+    gDPSetDepthImage(g++, K0(Z_PHYS));
+    gDPSetCycleType(g++, G_CYC_1CYCLE);
+    gDPSetRenderMode(g++, G_RM_ZB_OPA_SURF, G_RM_ZB_OPA_SURF2);
+    gDPSetCombineMode(g++, G_CC_SHADE, G_CC_SHADE);
+    gSPSetGeometryMode(g++, G_ZBUFFER | G_SHADE | G_SHADING_SMOOTH);
+    ortho(m);
+    gSPMatrix(g++, mtx(m), G_MTX_PROJECTION | G_MTX_LOAD | G_MTX_NOPUSH);
+    ident(m);
+    gSPMatrix(g++, mtx(m), G_MTX_MODELVIEW | G_MTX_LOAD | G_MTX_NOPUSH);
+    uint32_t *zv = vtx(6);
+    vset(zv, 0, 240, 200, -100, 0, 0, 0x00FF00FF); vset(zv, 1, 240, 236, -100, 0, 0, 0x00FF00FF); vset(zv, 2, 300, 236, -100, 0, 0, 0x00FF00FF);
+    vset(zv, 3, 240, 200, 100, 0, 0, 0xFF0000FF); vset(zv, 4, 240, 236, 100, 0, 0, 0xFF0000FF); vset(zv, 5, 300, 236, 100, 0, 0, 0xFF0000FF);
+    gSPVertex(g++, zv, 6, 0);
+    gSP1Triangle(g++, 0, 1, 2, 0);
+    gSP1Triangle(g++, 3, 4, 5, 0);
+    /* R1 (primitive depth): a blue quad at ortho z 957 (z scale 1/1000 = 65/65536 in s15.16: screen z 996.0), then
+     * primitive-depth rectangles at screen z 997 (gDPSetPrimDepth(997 * 32), 47380.c units: hidden) and 995 (shown) */
+    uint32_t *pq = vtx(4);
+    vset(pq, 0, 180, 200, 957, 0, 0, 0x0000FFFF); vset(pq, 1, 180, 236, 957, 0, 0, 0x0000FFFF);
+    vset(pq, 2, 230, 236, 957, 0, 0, 0x0000FFFF); vset(pq, 3, 230, 200, 957, 0, 0, 0x0000FFFF);
+    gSPVertex(g++, pq, 4, 0);
+    gSP2Triangles(g++, 0, 1, 2, 0, 0, 2, 3, 0);
+    gDPPipeSync(g++);
+    gDPSetDepthSource(g++, G_ZS_PRIM);
+    gDPSetCombineMode(g++, G_CC_PRIMITIVE, G_CC_PRIMITIVE);
+    gDPSetPrimDepth(g++, 997 * 32, 0);
+    gDPSetPrimColor(g++, 0, 0, 255, 0, 0, 255);
+    gDPFillRectangle(g++, 185, 205, 200, 230);
+    gDPPipeSync(g++);
+    gDPSetPrimDepth(g++, 995 * 32, 0);
+    gDPSetPrimColor(g++, 0, 0, 255, 255, 0, 255);
+    gDPFillRectangle(g++, 210, 205, 225, 230);
+    gDPPipeSync(g++);
+    gDPSetDepthSource(g++, G_ZS_PIXEL);
+    gSPClearGeometryMode(g++, G_ZBUFFER);
+    gDPPipeSync(g++);
+    gDPSetRenderMode(g++, G_RM_OPA_SURF, G_RM_OPA_SURF2);
     /* branch: a called list branches to another, whose end returns to this one */
     {
         Gfx *b = branch2;
@@ -571,11 +645,29 @@ unsigned char *gfx_test_run2(void) {
     check("i4", p == rgba16(153, 153, 153, 1), "%04X (I 9 * 17)", p);
     uint16_t m1 = fb_px(FB2_PHYS, 320, 160 + 17, 12), m2 = fb_px(FB2_PHYS, 320, 160 + 30, 12), m0 = fb_px(FB2_PHYS, 320, 161, 12);
     check("mirror", m0 == rgba16(255, 0, 0, 1) && m1 == rgba16(0, 0, 255, 1) && m2 == rgba16(255, 0, 0, 1), "%04X %04X %04X", m0, m1, m2);
+    {
+        uint16_t c0 = fb_px(FB2_PHYS, 320, 160 + 20, 112), w0 = fb_px(FB2_PHYS, 320, 160 + 20, 132), w1 = fb_px(FB2_PHYS, 320, 160 + 28, 132);
+        check("tile_resize_wrap", c0 == rgba16(40, 40, 40, 1) && w0 == rgba16(255, 0, 0, 1) && w1 == rgba16(0, 0, 255, 1),
+              "first rect ends at 16 (%04X), second wraps: texel 20 = 4 %04X (red), texel 28 = 12 %04X (blue)", c0, w0, w1);
+    }
     p = fb_px(FB2_PHYS, 320, 30, 80);
     check("two_cycle_texel1", (p >> 11) >= 14 && (p >> 11) <= 17 && ((p >> 1) & 31) >= 14 && ((p >> 1) & 31) <= 17 && ((p >> 6) & 31) == 0, "%04X (half red, half blue)", p);
     uint16_t a = fb_px(FB2_PHYS, 320, 15, 185), b = fb_px(FB2_PHYS, 320, 115, 185), c = fb_px(FB2_PHYS, 320, 175, 185), d = fb_px(FB2_PHYS, 320, 65, 185);
     check("matrix_stack", a == 0xFFFF && b == 0xFFFF && d == rgba16(40, 40, 40, 1), "orig %04X pushed %04X between %04X", a, b, d);
     check("mw_matrix_patch", c == rgba16(0, 255, 0, 1), "%04X (green at +160)", c);
+    {
+        uint16_t e1 = fb_px(FB2_PHYS, 320, 240, 120), e2 = fb_px(FB2_PHYS, 320, 300, 120), e3 = fb_px(FB2_PHYS, 320, 300, 95);
+        int g1 = (e1 >> 6) & 31, g2 = (e2 >> 6) & 31;
+        check("eye_plane_vertex", g1 >= 1 && g1 <= 5 && g2 >= 11 && g2 <= 15 && e3 == rgba16(40, 40, 40, 1),
+              "x 240: %04X (green %d, 3 expected), x 300: %04X (green %d, 13 expected), above the strip %04X", e1, g1, e2, g2, e3);
+    }
+    p = fb_px(FB2_PHYS, 320, 250, 230);
+    check("othermode_per_task", p == rgba16(0, 255, 0, 1), "%04X (the near green triangle; red = depth source leaked from task 1)", p);
+    {
+        uint16_t far = fb_px(FB2_PHYS, 320, 190, 215), nearer = fb_px(FB2_PHYS, 320, 215, 215);
+        check("prim_depth_units", far == rgba16(0, 0, 255, 1) && nearer == rgba16(255, 255, 0, 1),
+              "screen z 997 over the quad at 996: %04X (blue: hidden), 995: %04X (yellow)", far, nearer);
+    }
     uint16_t y = fb_px(FB2_PHYS, 320, 255, 155), cy = fb_px(FB2_PHYS, 320, 285, 155), bg = fb_px(FB2_PHYS, 320, 5, 230);
     check("branch_list", y == rgba16(255, 255, 0, 1) && cy == rgba16(0, 255, 255, 1) && bg == rgba16(40, 40, 40, 1), "%04X %04X %04X", y, cy, bg);
     port_gfx_vi_frame(rd(FB2_PHYS), 320);
