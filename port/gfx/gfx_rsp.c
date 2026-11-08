@@ -124,6 +124,13 @@ static float tex_scale_s = 1, tex_scale_t = 1;
 static uint32_t rdphalf1;
 static int ucode_l3dex2;
 
+/* G_SETPRIMDEPTH z (15 bits) as NDC z: the game computes it as the screen z the RSP would give a vertex there, times
+ * 32 (app_render/47380.c, effect.c: sz = ndc * vscale[2] + vtrans[2]; gDPSetPrimDepth(sz * 32)) */
+float gfx_prim_depth_ndc(unsigned z) {
+    float n = vp_sz != 0 ? ((float)(z & 0x7FFF) / 32.0f - vp_tz) / vp_sz : 0;
+    return n < -1 ? -1 : n > 1 ? 1 : n;
+}
+
 static GfxVtx vbuf[64];
 static float vndc[64][3];      /* NDC x, y (y up) and w for culling / branch z */
 

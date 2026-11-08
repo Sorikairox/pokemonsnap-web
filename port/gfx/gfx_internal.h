@@ -67,6 +67,7 @@ typedef struct {
 /* RSP state the RDP side needs */
 extern uint32_t gfx_geom;                 /* geometry mode */
 extern int gfx_tex_on, gfx_tex_tile, gfx_tex_level;
+float gfx_prim_depth_ndc(unsigned z);   /* G_SETPRIMDEPTH z -> NDC z with the current viewport (R1) */
 
 /* ------------------------------------------------------------------ RDP side (gfx_rdp.c) */
 void rdp_reset_task(void);

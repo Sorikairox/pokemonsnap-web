@@ -592,6 +592,25 @@ unsigned char *gfx_test_run2(void) {
     gSPVertex(g++, zv, 6, 0);
     gSP1Triangle(g++, 0, 1, 2, 0);
     gSP1Triangle(g++, 3, 4, 5, 0);
+    /* R1 (primitive depth): a blue quad at ortho z 957 (z scale 1/1000 = 65/65536 in s15.16: screen z 996.0), then
+     * primitive-depth rectangles at screen z 997 (gDPSetPrimDepth(997 * 32), 47380.c units: hidden) and 995 (shown) */
+    uint32_t *pq = vtx(4);
+    vset(pq, 0, 180, 200, 957, 0, 0, 0x0000FFFF); vset(pq, 1, 180, 236, 957, 0, 0, 0x0000FFFF);
+    vset(pq, 2, 230, 236, 957, 0, 0, 0x0000FFFF); vset(pq, 3, 230, 200, 957, 0, 0, 0x0000FFFF);
+    gSPVertex(g++, pq, 4, 0);
+    gSP2Triangles(g++, 0, 1, 2, 0, 0, 2, 3, 0);
+    gDPPipeSync(g++);
+    gDPSetDepthSource(g++, G_ZS_PRIM);
+    gDPSetCombineMode(g++, G_CC_PRIMITIVE, G_CC_PRIMITIVE);
+    gDPSetPrimDepth(g++, 997 * 32, 0);
+    gDPSetPrimColor(g++, 0, 0, 255, 0, 0, 255);
+    gDPFillRectangle(g++, 185, 205, 200, 230);
+    gDPPipeSync(g++);
+    gDPSetPrimDepth(g++, 995 * 32, 0);
+    gDPSetPrimColor(g++, 0, 0, 255, 255, 0, 255);
+    gDPFillRectangle(g++, 210, 205, 225, 230);
+    gDPPipeSync(g++);
+    gDPSetDepthSource(g++, G_ZS_PIXEL);
     gSPClearGeometryMode(g++, G_ZBUFFER);
     gDPPipeSync(g++);
     gDPSetRenderMode(g++, G_RM_OPA_SURF, G_RM_OPA_SURF2);
@@ -644,6 +663,11 @@ unsigned char *gfx_test_run2(void) {
     }
     p = fb_px(FB2_PHYS, 320, 250, 230);
     check("othermode_per_task", p == rgba16(0, 255, 0, 1), "%04X (the near green triangle; red = depth source leaked from task 1)", p);
+    {
+        uint16_t far = fb_px(FB2_PHYS, 320, 190, 215), nearer = fb_px(FB2_PHYS, 320, 215, 215);
+        check("prim_depth_units", far == rgba16(0, 0, 255, 1) && nearer == rgba16(255, 255, 0, 1),
+              "screen z 997 over the quad at 996: %04X (blue: hidden), 995: %04X (yellow)", far, nearer);
+    }
     uint16_t y = fb_px(FB2_PHYS, 320, 255, 155), cy = fb_px(FB2_PHYS, 320, 285, 155), bg = fb_px(FB2_PHYS, 320, 5, 230);
     check("branch_list", y == rgba16(255, 255, 0, 1) && cy == rgba16(0, 255, 255, 1) && bg == rgba16(40, 40, 40, 1), "%04X %04X %04X", y, cy, bg);
     port_gfx_vi_frame(rd(FB2_PHYS), 320);

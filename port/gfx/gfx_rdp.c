@@ -1136,7 +1136,7 @@ static int begin_batch(int kind, int tile) {
         c[0] = (f >> 11) / 31.0f; c[1] = ((f >> 6) & 31) / 31.0f; c[2] = ((f >> 1) & 31) / 31.0f; c[3] = f & 1;
         glUniform4f(p->u_fill, c[0], c[1], c[2], c[3]);
     }
-    float zp = (prim_depth >> 16 & 0x7FFF) / 32767.0f;
+    float zp = gfx_prim_depth_ndc(prim_depth >> 16) * 0.5f + 0.5f;   /* GL depth, like a vertex at that screen z */
     glUniform4f(p->u_misc, (conv_k[4] & 0x1FF) / 255.0f, (conv_k[5] & 0x1FF) / 255.0f, prim_lod_frac / 255.0f, zp);
     /* blending: the last blender cycle reads memory and FORCE_BL */
     unsigned last = cyc == CYC_2 ? 1 : 0;
@@ -1332,7 +1332,7 @@ void rdp_line(const GfxVtx *a, const GfxVtx *b, float width) {
 
 static void quad(float x0, float y0, float x1, float y1, float s0, float t0, float s1, float t1, int flip) {
     static const float black[4] = {0, 0, 0, 0};
-    float z = ((prim_depth >> 16 & 0x7FFF) / 32767.0f) * 2.0f - 1.0f;
+    float z = gfx_prim_depth_ndc(prim_depth >> 16);
     /* corners: (x0,y0) (x1,y0) (x1,y1) (x0,y1); flip swaps the s/t directions */
     float cs[4], ct[4];
     if (!flip) { cs[0] = s0; ct[0] = t0; cs[1] = s1; ct[1] = t0; cs[2] = s1; ct[2] = t1; cs[3] = s0; ct[3] = t1; }
