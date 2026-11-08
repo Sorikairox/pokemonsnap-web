@@ -428,6 +428,76 @@ def abs_syms(text, absmap, st):
     return SYMREF.sub(ref, text)
 
 
+# S3a: console RAM addresses used as pointers (WPO trap 2). Game C hard-codes KSEG0 addresses (`#define VPK_VRAM
+# 0x802BC110`, `UNK_STUFF_VRAM 0x80200000` decompressed into and then called, `*(u8*) 0x807FFFF0`), passes them as
+# u32 and converts them to pointers later. Game memory is the RDRAM mirror, so every integer -> pointer conversion in
+# game code maps KSEG0 0x80000000..0x807FFFFF to the same offset in n64_rdram, and keeps any other value (wasm
+# addresses, which never reach 0x80000000; small segment / null values):
+#   * constant `inttoptr (i32 C to ptr)` with C in KSEG0 RAM -> `getelementptr (i8, ptr @n64_rdram, i32 C - K0)`;
+#   * run-time `%p = inttoptr i32 %x to ptr` -> range check + select, then the inttoptr.
+# Runs before the vbe pass (whose own lane-address inttoptrs are left alone). KSEG1 RDRAM (0xA0000000..) is not
+# mapped: a cheap test would also catch wasm addresses at 0x20000000.. once the heap grows past 512 MiB.
+K0, K0_END = 0x80000000, 0x80800000
+K0_CONST = re.compile(r'inttoptr \(i32 (-?\d+) to ptr\)')
+K0_RUN = re.compile(r'^(\s*)(%[\w.$-]+) = inttoptr i32 (%[\w.$-]+) to ptr((?:, !dbg !\d+)?)$', re.M)
+K0_LOAD = re.compile(r'^(\s*)(%[\w.$-]+) = load (volatile )?ptr, ptr ([%@][\w.$-]+)((?:, align \d+)?(?:, !\w+ !\d+)*)$', re.M)
+
+
+def k0_ptrs(text, st):
+    def const(m):
+        v = int(m[1]) & 0xFFFFFFFF
+        if K0 <= v < K0_END:
+            st['k0_const'] += 1
+            return f'getelementptr (i8, ptr @n64_rdram, i32 {v - K0})'
+        return m[0]
+    text = K0_CONST.sub(const, text)
+    n = [0]
+
+    def run(m):
+        n[0] += 1
+        st['k0_run'] += 1
+        ind, r, x, dbg = m[1], m[2], m[3], m[4]
+        t = f'%k0.{n[0]}'
+        return (f'{ind}{t}.a = add i32 {x}, -2147483648{dbg}\n'
+                f'{ind}{t}.b = icmp ult i32 {t}.a, 8388608{dbg}\n'
+                f'{ind}{t}.c = add i32 {t}.a, ptrtoint (ptr @n64_rdram to i32){dbg}\n'
+                f'{ind}{t}.d = select i1 {t}.b, i32 {t}.c, i32 {x}{dbg}\n'
+                f'{ind}{r} = inttoptr i32 {t}.d to ptr{dbg}')
+    text = K0_RUN.sub(run, text)
+    # pointers loaded from game memory: data the relocations do not cover (vpk0-compressed blobs the game
+    # decompresses at run time: sprites with KSEG0 pointers inside; unmapped data) hold console addresses. Every
+    # `load ptr` that is not a plain local variable (an alloca slot of the -O0 IR) is mapped the same way.
+    allocas = set()
+    # the TU's own C globals hold wasm addresses (game stores, initialisers): not mapped; mirror labels (external
+    # declarations: data from the ROM) are
+    cglob = set(re.findall(r'^(@[\w.$-]+) = (?!external)', text, re.M))
+
+    def ld(m):
+        ind, r, vol, p, rest = m[1], m[2], m[3] or '', m[4], m[5]
+        if p in allocas or p in cglob:
+            return m[0]
+        n[0] += 1
+        st['k0_load'] += 1
+        t = f'%k0.{n[0]}'
+        dbg = re.search(r', !dbg !\d+$', rest)
+        dbg = dbg[0] if dbg else ''
+        return (f'{ind}{t}.l = load {vol}ptr, ptr {p}{rest}\n'
+                f'{ind}{t}.i = ptrtoint ptr {t}.l to i32{dbg}\n'
+                f'{ind}{t}.a = add i32 {t}.i, -2147483648{dbg}\n'
+                f'{ind}{t}.b = icmp ult i32 {t}.a, 8388608{dbg}\n'
+                f'{ind}{t}.c = add i32 {t}.a, ptrtoint (ptr @n64_rdram to i32){dbg}\n'
+                f'{ind}{t}.d = select i1 {t}.b, i32 {t}.c, i32 {t}.i{dbg}\n'
+                f'{ind}{r} = inttoptr i32 {t}.d to ptr{dbg}')
+    out = []
+    for blk in re.split(r'(?=^define )', text, flags=re.M):
+        allocas = set(re.findall(r'^\s*(%[\w.$-]+) = alloca ', blk, re.M))
+        out.append(K0_LOAD.sub(ld, blk))
+    text = ''.join(out)
+    if (st['k0_const'] or st['k0_run'] or st['k0_load']) and not re.search(r'^@n64_rdram = ', text, re.M):
+        text += '\n@n64_rdram = external global [8388608 x i8]\n'
+    return text
+
+
 # RCP / PI / SI register accesses through a constant KSEG1 address (rcp.h IO_READ / IO_WRITE in game C) are not
 # memory on the PC. Constant
 # 32-bit loads/stores in 0xA4000000..0xA4FFFFFF become calls to the PC register model
@@ -487,7 +557,7 @@ def main():
             absmap[n] = int(v, 16)
     st0 = collections.Counter()
     text = RENAME.sub(r'@vbe.\1', open(src).read())
-    text = rcp_io(abs_syms(text, absmap, st0), st0)
+    text = k0_ptrs(rcp_io(abs_syms(text, absmap, st0), st0), st0)
     p = Pass(text.split('\n'))
     p.st.update(st0)
     if sigdb:  # canonical signatures (port/tools/sigs.py, collected by port_build.py before this pass)
@@ -499,9 +569,34 @@ def main():
                 can['@vbe.' + k] = can['@' + k]
         p.lines = sigs.normalize(p.lines, can, p.tmp, st)
         p.st.update(st)
-    # TODO(S3): indirect calls -> site-typed trampolines with a signature check (Conker port/tools/icall.py)
-    text = p.run()
+    # S3a: indirect calls -> site-typed trampolines with a signature check (port/tools/icall.py)
+    import icall
+    st2 = collections.Counter()
+    p.lines, need = icall.rewrite(p.lines, st2)
+    regs = icall.registrations(p.lines)
+    p.st.update(st2)
+    vrams = {}
+    fvf = sys.argv[5] if len(sys.argv) > 5 else '-'
+    if fvf != '-':  # 'name vram segment-index' per function of this TU in the matching build (port_build.py)
+        for l in open(fvf):
+            n, v, s = l.split()
+            vrams['@' + n] = (int(v, 16), int(s))
+    text = icall.epilogue(p.run(), need, regs, vrams)
+    # S3a: writable globals of an overlay TU go to the wasm data section ovl_<segment>, so that the PC layer can reset
+    # them when the game loads the overlay again (pc_mem.c port_dma_loaded; __start_/__stop_ symbols)
+    sec = sys.argv[6] if len(sys.argv) > 6 else '-'
+    if sec != '-':
+        def put(m):
+            p.st['ovlglob'] = p.st.get('ovlglob', 0) + 1
+            body = m[2]
+            am = re.search(r', align \d+$', body)
+            return (f'{m[1]}{body[:am.start()]}, section "{sec}"{body[am.start():]}' if am
+                    else f'{m[1]}{body}, section "{sec}"')
+        text = re.sub(r'^(@(?!llvm\.|__icall|__vbe)[\w.$-]+ = (?:(?:internal|private|dso_local|hidden|unnamed_addr|'
+                      r'local_unnamed_addr|common|weak|linkonce_odr|weak_odr) )*global )((?!.*\bsection\b).*)$',
+                      put, text, flags=re.M)
     open(dst, 'w').write(text)
+    open(dst + '.isig', 'w').write(''.join(sorted({w + '\n' for _, w in regs})))
     if sigdb:
         import sigs
         open(dst + '.short', 'w').write(''.join(f'{a}\t{b}\t{c}\t{d}\n' for a, b, c, d in sigs.SHORT))

@@ -104,9 +104,15 @@ extern GObj* D_802EF488_5EC558;
 
 typedef union Unk803430E8 {
     struct {
+#ifdef PORT /* wasm port: bitfields LSB first (IDO allocates from the MSB; include/common_structs.h) */
+        u32 unk_02 : 30;
+        u32 unk_01 : 1;
+        u32 unk_00 : 1;
+#else
         u32 unk_00 : 1;
         u32 unk_01 : 1;
         u32 unk_02 : 30;
+#endif
     } bits;
     u32 intval;
 } Unk803430E8;

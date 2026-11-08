@@ -4,6 +4,40 @@
 
 typedef struct Foo2 {
     PhotoData* var_0;
+#ifdef PORT /* wasm port: bitfields LSB first (IDO allocates from the MSB; include/common_structs.h) */
+    u32 unk4_0 : 1;
+    u32 unk4_1 : 1;
+    u32 unk4_2 : 1;
+    u32 unk4_3 : 1;
+    u32 unk4_4 : 1;
+    u32 unk4_5 : 1;
+    u32 unk4_6 : 1;
+    u32 unk4_7 : 1;
+    u32 unk4_8 : 1;
+    u32 unk4_9 : 1;
+    u32 unk4_10 : 1;
+    u32 unk4_11 : 1;
+    u32 unk4_12 : 1;
+    u32 unk4_13 : 1;
+    u32 unk4_14 : 1;
+    u32 unk4_15 : 1;
+    u32 unk4_16 : 1;
+    u32 unk4_17 : 1;
+    u32 unk4_18 : 1;
+    u32 unk4_19 : 1;
+    u32 unk4_20 : 1;
+    u32 unk4_21 : 1;
+    u32 unk4_22 : 1;
+    u32 unk4_23 : 1;
+    u32 unk4_24 : 1;
+    u32 unk4_25 : 1;
+    u32 unk4_26 : 1;
+    u32 unk4_27 : 1;
+    u32 unk4_28 : 1;
+    u32 unk4_29 : 1;
+    u32 unk4_30 : 1;
+    u32 unk4_31 : 1;
+#else
     u32 unk4_31 : 1;
     u32 unk4_30 : 1;
     u32 unk4_29 : 1;
@@ -36,6 +70,7 @@ typedef struct Foo2 {
     u32 unk4_2 : 1;
     u32 unk4_1 : 1;
     u32 unk4_0 : 1;
+#endif
 } Foo2; // size = 0x8
 
 extern s32 D_801F4194_9A3C04;

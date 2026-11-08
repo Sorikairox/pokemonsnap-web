@@ -225,20 +225,46 @@ def summarize_warnings(stderr):
     return ' '.join(f'{k[2:]}={v}' for k, v in c.most_common())
 
 
-TOOLS = ['port/tools/vbe.py', 'port/tools/sigs.py']
+TOOLS = ['port/tools/vbe.py', 'port/tools/sigs.py', 'port/tools/icall.py']
+FVRAM = f'{OUT}/fvram'
 
 
-def build_obj(src, sig_hash, abs_hash):
+def tu_meta(rows):
+    """S3a: per compiled TU, (a) its functions' console addresses for the address -> function table
+    (port/build/fvram/<tag>.txt: 'name vram segment-index', from port/symbols/symbols.tsv) and (b) the wasm data
+    section of its writable globals: ovl_<segment> for overlay TUs (reset on reload, pc_mem.c), none for main."""
+    segs = [r[0] for r in tsv(f'{SYM}/segments.tsv') if r[2] not in ('-', '')]  # = port_segments order
+    sidx = {s: i for i, s in enumerate(segs)}
+    funcs = collections.defaultdict(list)
+    for r in tsv(f'{SYM}/symbols.tsv'):
+        name, vram, rom, size, typ, bind, sec, seg, obj = r
+        if typ == 'func' and seg in sidx and obj.startswith('build/'):
+            funcs[src_of(obj)].append(f'{name} {vram} {sidx[seg]}\n')
+    os.makedirs(FVRAM, exist_ok=True)
+    meta = {}
+    for src, seg, cat, action, nf, secs in rows:
+        if action != 'compile':
+            continue
+        fv = f'{FVRAM}/{tag_of(src)}.txt'
+        write_if_changed(fv, ''.join(sorted(funcs.get(src, []))))
+        sec = f'ovl_{seg}' if seg in sidx and seg != 'main' and re.match(r'^[A-Za-z_]\w*$', seg) else '-'
+        meta[src] = (fv, sec)
+    return meta
+
+
+def build_obj(src, sig_hash, abs_hash, meta):
     tag = tag_of(src)
     ll, vll, obj, kf = f'{LL}/{tag}.ll', f'{LL}/{tag}.v.ll', f'{VOBJ}/{tag}.o', f'{VOBJ}/{tag}.key'
-    k = key([(jload(f'{LL}/{tag}.key') or {}).get('key', 'none'), sig_hash, abs_hash, ' '.join(O1_FLAGS)], TOOLS)
+    fv, sec = meta[src]
+    k = key([(jload(f'{LL}/{tag}.key') or {}).get('key', 'none'), sig_hash, abs_hash, ' '.join(O1_FLAGS), sec],
+            TOOLS + [fv])
     old = jload(kf)
     if old and old['key'] == k and os.path.exists(obj):
         return src, 0, old['stats'], False
     if os.path.exists(kf):
         os.remove(kf)
-    p = subprocess.run([sys.executable, 'port/tools/vbe.py', ll, vll, f'{OUT}/sigdb.json', f'{OUT}/abs_syms.txt'],
-                       capture_output=True, text=True)
+    p = subprocess.run([sys.executable, 'port/tools/vbe.py', ll, vll, f'{OUT}/sigdb.json', f'{OUT}/abs_syms.txt',
+                        fv, sec], capture_output=True, text=True)
     if p.returncode:
         return src, 2, p.stderr[-3000:], True
     stats = p.stdout.strip().split(' ', 1)[1] if ' ' in p.stdout.strip() else ''
@@ -325,7 +351,9 @@ def main():
         nobj = 0
         tot = collections.Counter()
         objs = []
-        for src, rc, msg, rebuilt in pool.map(lambda s: build_obj(s, sig_hash, abs_hash), ok):
+        meta = tu_meta(rows)
+        _hash.clear()  # the fvram files were just (re)written
+        for src, rc, msg, rebuilt in pool.map(lambda s: build_obj(s, sig_hash, abs_hash, meta), ok):
             nobj += rebuilt
             if rc:
                 fails[src] = ({2: 'vbe', 3: 'IR->obj'}[rc], msg)
@@ -356,7 +384,12 @@ def main():
     # phase 5: PC layer (native)
     pc_srcs = sorted(f'port/ultra/{f}' for f in os.listdir('port/ultra') if f.endswith('.c')) + \
         sorted(f'port/boot/{f}' for f in os.listdir('port/boot') if f.endswith('.c'))
-    segtab_c = gen_segments()
+    ovl_secs = sorted({meta[s][1] for s, msg in status.items() if meta[s][1] != '-' and 'ovlglob=' in msg})
+    segtab_c = gen_segments(ovl_secs)
+    import icall_gen
+    nsig = icall_gen.generate(f'{GEN}/icall_tab.c', LL)
+    print(f'icall: {tot["icall"]} indirect call sites -> trampolines ({tot["icall_skip"]} left), {nsig} target '
+          f'signatures; {tot["ovlglob"]} overlay globals in {len(ovl_secs)} ovl_* sections')
     pc_objs, pc_fail = [], False
 
     def pc_one(src):
@@ -364,7 +397,7 @@ def main():
         rc, so, se = run(PC_FLAGS + [src, '-o', obj])
         return src, obj, rc, se
     with cf.ThreadPoolExecutor(os.cpu_count() or 4) as pool:
-        for src, obj, rc, se in pool.map(pc_one, pc_srcs + [segtab_c]):
+        for src, obj, rc, se in pool.map(pc_one, pc_srcs + [segtab_c, f'{GEN}/icall_tab.c']):
             if rc:
                 print(f'--- FAILED (PC layer) {src}\n{se[-3000:]}'); pc_fail = True
             else:
@@ -388,7 +421,8 @@ def main():
         '-o', js, '-O1', '-sGLOBAL_BASE=256MB', '-sINITIAL_MEMORY=384MB', '-sALLOW_MEMORY_GROWTH=1',
         '-sSTACK_SIZE=1MB', '-sASYNCIFY', '-sASYNCIFY_STACK_SIZE=65536', '-sMODULARIZE=1',
         '-sEXPORT_NAME=createPokemonSnap', '-sINVOKE_RUN=0', '-sEXIT_RUNTIME=0', '-sENVIRONMENT=worker,node',
-        '-sERROR_ON_UNDEFINED_SYMBOLS=1', '-sEXPORTED_FUNCTIONS=_main,_malloc,_free,_port_set_rom,_port_stub_report',
+        '-sERROR_ON_UNDEFINED_SYMBOLS=1', '-sEXPORTED_FUNCTIONS=_main,_malloc,_free,_port_set_rom,_port_stub_report,_port_vi_retrace,_port_set_pad,'
+        '_port_flash_image,_port_flash_generation',
         '-sEXPORTED_RUNTIME_METHODS=HEAPU8,HEAP32,callMain', '--profiling-funcs',
         '-Wl,--error-limit=0', f'-Wl,-Map={OUT}/pokemonsnap.map']
     rc, so, se = run(link)
@@ -401,15 +435,22 @@ def main():
           f'(port/build/link_log.txt); {stub_rep}')
 
 
-def gen_segments():
-    """port/build/gen/pc_segments.c: the segment table (name, ROM range, VRAM, bss) from port/symbols/segments.tsv"""
-    rows = tsv(f'{SYM}/segments.tsv')
+def gen_segments(ovl_secs=()):
+    """port/build/gen/pc_segments.c: the segment table (name, ROM range, VRAM, bss) from port/symbols/segments.tsv,
+    and (S3a) the wasm data sections ovl_<segment> holding the overlay TUs' writable C globals"""
+    rows = [r for r in tsv(f'{SYM}/segments.tsv') if r[2] not in ('-', '')]
     h = lambda x: '0' if x in ('-', '') else '0x' + x
     body = ''.join(f'    {{"{r[0]}", "{r[1]}", {h(r[2])}, {h(r[3])}, {h(r[4])}, {h(r[5])}, {h(r[6])}, {h(r[7])}}},\n'
-                   for r in rows if r[2] not in ('-', ''))
+                   for r in rows)
+    idx = {r[0]: i for i, r in enumerate(rows)}
+    ovl = [(idx[s[4:]], s) for s in ovl_secs]
     txt = ('/* GENERATED by port/tools/port_build.py from port/symbols/segments.tsv - do not edit. Offsets only. */\n'
            '#include "pc_mem.h"\nconst PortSegment port_segments[] = {\n' + body + '};\n'
-           'const unsigned port_segment_count = sizeof(port_segments) / sizeof(port_segments[0]);\n')
+           'const unsigned port_segment_count = sizeof(port_segments) / sizeof(port_segments[0]);\n' +
+           ''.join(f'extern unsigned char __start_{s}[] __attribute__((weak)), __stop_{s}[] __attribute__((weak));\n' for _, s in ovl) +
+           'const PortOvlData port_ovl_data[] = {\n' +
+           ''.join(f'    {{{i}, __start_{s}, __stop_{s}}},\n' for i, s in ovl) + '    {0, 0, 0}};\n'
+           f'const unsigned port_ovl_data_count = {len(ovl)};\n')
     p = f'{GEN}/pc_segments.c'
     write_if_changed(p, txt)
     return p

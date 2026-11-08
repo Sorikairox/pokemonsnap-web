@@ -28,6 +28,12 @@ extern const PortRelocTarget port_reloc_targets[];
 extern const PortReloc port_relocs[];
 extern const PortRelocRange port_reloc_ranges[];
 extern const unsigned port_segment_count;
+/* C data + bss of the compiled TUs of an overlay segment: wasm data section ovl_<segment> (port_build.py puts every
+ * writable global of those TUs there), gen/pc_segments.c */
+typedef struct PortOvlData { unsigned segment; unsigned char *start, *end; } PortOvlData;
+extern const PortOvlData port_ovl_data[];
+extern const unsigned port_ovl_data_count;
+extern unsigned port_vi_count;
 
 #define VBE8(p) ((unsigned char *)((uintptr_t)(p) ^ 3))
 #define VBE16(p) ((unsigned short *)((uintptr_t)(p) ^ 2))
@@ -53,6 +59,11 @@ int port_rom_copy(void *dst, uint32_t rom, uint32_t n);
  * relocations (pointer words -> wasm addresses / function-table indices) */
 int port_load_segment(const char *name);
 const PortSegment *port_find_segment(const char *name);
+/* after a copy from the ROM into game memory: relocations / overlay residency / overlay C data reset (pc_mem.c) */
+void port_dma_loaded(void *dst, uint32_t rom, uint32_t n);
+void port_mem_init(void);
+int port_segment_resident(unsigned si);
+const char *port_resident_at(uint32_t vram);
 
 void port_log(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
 #endif

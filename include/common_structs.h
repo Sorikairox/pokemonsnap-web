@@ -227,10 +227,27 @@ typedef struct PlayerName {
 } PlayerName; // size = 0x10
 
 typedef struct PokemonPhotoData {
+#ifdef PORT
+    /* wasm port: IDO allocates bitfields from the MSB, clang (little-endian) from the LSB; in the port's virtual
+     * big-endian memory the word at 0x00 holds its big-endian value, so the fields are declared LSB first */
+    union {
+        struct {
+            u32 pad_00_0 : 8; /* poseID */
+            u32 specialID : 5;
+            u32 unk_00_13 : 6;
+            s32 pokemonID : 13;
+        };
+        struct {
+            u8 pad_00_1[3];
+            /* 0x03 */ u8 poseID;
+        };
+    };
+#else
     /* 0x00 */ s32 pokemonID : 13;
     /* 0x00 */ u32 unk_00_13 : 6;
     /* 0x02 */ u16 specialID : 5;
     /* 0x03 */ u8 poseID;
+#endif
     /* 0x04 */ f32 animationTime;
     /* 0x08 */ Vec3f position;
     /* 0x14 */ f32 yaw;
@@ -255,10 +272,26 @@ typedef struct EffectPhotoData {
 } EffectPhotoData; // size = 0x10
 
 typedef struct PhotoData {
+#ifdef PORT
+    /* wasm port: bitfields LSB first (see PokemonPhotoData) */
+    union {
+        struct {
+            u32 pad_00_0 : 16; /* unk_02 */
+            u32 unk_00_16 : 8;
+            u32 unk_00_24 : 1;
+            s32 levelID : 7;
+        };
+        struct {
+            char pad_00_1[2];
+            /* 0x002 */ char unk_02[0x2];
+        };
+    };
+#else
     /* 0x000 */ s8 levelID : 7;
     u8 unk_00_24 : 1;
     u32 unk_00_16 : 8;
     /* 0x002 */ char unk_02[0x2];
+#endif
     /* 0x004 */ union {
         s32 s32;
         f32 f32;

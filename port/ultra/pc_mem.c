@@ -86,11 +86,18 @@ const PortSegment *port_find_segment(const char *name) {
     return NULL;
 }
 
-/* Rewrite the pointer words of segment `si` (just copied from the ROM, so each word holds the console address). */
-static void apply_relocs(unsigned si) {
+/* Rewrite the pointer words of segment `si` whose console address lies in [vlo, vhi): they were just copied from
+ * the ROM, so each holds its console address. Each segment's list is sorted by address (gen_stubs.py). */
+static unsigned reloc_bad;
+unsigned port_reloc_words;
+static void apply_relocs(unsigned si, uint32_t vlo, uint32_t vhi) {
     const PortRelocRange *r = &port_reloc_ranges[si];
-    unsigned nm = 0, nc = 0, nf = 0, bad = 0, nocode = 0, nabs = 0;
-    for (unsigned i = r->first; i < r->first + r->count; i++) {
+    unsigned nm = 0, nc = 0, nf = 0, bad = 0, nocode = 0, nabs = 0, lo = r->first, hi = r->first + r->count;
+    while (lo < hi) { /* first word >= vlo */
+        unsigned mid = (lo + hi) / 2;
+        if (port_relocs[mid].word_vram < vlo) lo = mid + 1; else hi = mid;
+    }
+    for (unsigned i = lo; i < r->first + r->count && port_relocs[i].word_vram < vhi; i++) {
         const PortReloc *rl = &port_relocs[i];
         uint32_t *p = port_n64_to_wasm(rl->word_vram), w = *p;
         if (rl->target == -3) { nabs++; continue; }   /* absolute symbol outside RAM (segment address): keep */
@@ -112,9 +119,79 @@ static void apply_relocs(unsigned si) {
             nc++;
         }
     }
-    if (r->count)
-        port_log("[mem]   %u relocations: %u mirror, %u C data, %u functions, %u absolute, %u code without port body, "
-                 "%u bad\n", r->count, nm, nc, nf, nabs, nocode, bad);
+    reloc_bad += bad;
+    port_reloc_words += nm + nc + nf;
+    if (bad)
+        port_log("[mem]   %s: %u mirror, %u C data, %u functions, %u absolute, %u code without port body, %u BAD\n",
+                 port_segments[si].name, nm, nc, nf, nabs, nocode, bad);
+}
+
+/* ---------------------------------------------------------------- overlays (docs/port/MEMORY.md "Overlays")
+ * Code is linked once, so "loading an overlay" means: its ROM bytes land in the mirror (the data the port does not
+ * compile, plus the code bytes, unused), its pointer words are relocated, and the C data / bss of its compiled TUs
+ * (wasm data section ovl_<segment>, port_build.py) are reset to their initial values, as the console's DMA of the
+ * data and bzero of the bss would. Whoever copies the bytes (dmaLoadOverlay, dmaReadRom of a whole segment, the boot
+ * loader), port_dma_loaded() sees the copy: a copy from a segment's ROM range to the matching place of its VRAM is a
+ * load of (that part of) the segment. A copy that includes the segment's first byte makes it resident at its VRAM
+ * (and any overlapping segment not): the address -> function table (pc_icall.c) picks the resident overlay. */
+#define MAX_SEGS 512
+static unsigned char resident[MAX_SEGS];
+static unsigned char *ovl_snap[MAX_SEGS];
+unsigned port_ovl_loads, port_ovl_resets;
+
+static uint32_t seg_ram_end(const PortSegment *s) { return s->bss_end > s->vram_end ? s->bss_end : s->vram_end; }
+
+void port_mem_init(void) {
+    for (unsigned i = 0; i < port_ovl_data_count; i++) {
+        const PortOvlData *o = &port_ovl_data[i];
+        size_t n = (size_t)(o->end - o->start);
+        ovl_snap[o->segment] = malloc(n ? n : 1);
+        memcpy(ovl_snap[o->segment], o->start, n);
+    }
+}
+
+static void ovl_reset(unsigned si) {
+    for (unsigned i = 0; i < port_ovl_data_count; i++) {
+        const PortOvlData *o = &port_ovl_data[i];
+        if (o->segment == si && ovl_snap[si]) {
+            memcpy(o->start, ovl_snap[si], (size_t)(o->end - o->start));
+            port_ovl_resets++;
+        }
+    }
+}
+
+int port_segment_resident(unsigned si) { return si < MAX_SEGS && resident[si]; }
+const char *port_resident_at(uint32_t vram) {
+    for (unsigned i = 0; i < port_segment_count; i++) {
+        const PortSegment *s = &port_segments[i];
+        if (resident[i] && vram >= s->vram_start && vram < seg_ram_end(s)) return s->name;
+    }
+    return NULL;
+}
+
+void port_dma_loaded(void *dstp, uint32_t rom, uint32_t n) {
+    uint32_t dst = port_wasm_to_n64(dstp);
+    if (!dst || !n) return;
+    for (unsigned i = 0; i < port_segment_count; i++) {
+        const PortSegment *s = &port_segments[i];
+        if (s->vram_start < 0x80000000u || s->rom_end <= s->rom_start) continue;
+        if (rom >= s->rom_end || rom + n <= s->rom_start) continue;
+        if (dst - rom != s->vram_start - s->rom_start) continue; /* not copied to its own VRAM: a plain data copy */
+        uint32_t lo = rom > s->rom_start ? rom : s->rom_start, hi = rom + n < s->rom_end ? rom + n : s->rom_end;
+        if (rom <= s->rom_start) {
+            for (unsigned j = 0; j < port_segment_count; j++) {
+                const PortSegment *o = &port_segments[j];
+                if (j != i && resident[j] && o->vram_start < seg_ram_end(s) && seg_ram_end(o) > s->vram_start)
+                    resident[j] = 0;
+            }
+            if (i < MAX_SEGS) resident[i] = 1;
+            port_ovl_loads++;
+            ovl_reset(i);
+            port_log("[ovl] %s loaded at %08X (ROM %X..%X) at retrace %u\n", s->name, s->vram_start, s->rom_start,
+                     s->rom_end, port_vi_count);
+        }
+        apply_relocs(i, s->vram_start + (lo - s->rom_start), s->vram_start + (hi - s->rom_start));
+    }
 }
 
 int port_load_segment(const char *name) {
@@ -124,11 +201,14 @@ int port_load_segment(const char *name) {
     unsigned char *dst = port_n64_to_wasm(s->vram_start);
     if (!dst || port_rom_copy(dst, s->rom_start, s->rom_end - s->rom_start)) return -1;
     if (s->bss_start && s->bss_end > s->bss_start) memset(port_n64_to_wasm(s->bss_start), 0, s->bss_end - s->bss_start);
-    apply_relocs((unsigned)(s - port_segments));
-    port_log("[mem] %s: ROM 0x%X..0x%X -> 0x%08X (bss 0x%X bytes)\n", name, s->rom_start, s->rom_end, s->vram_start,
-             s->bss_end > s->bss_start ? s->bss_end - s->bss_start : 0);
-    return 0;
+    unsigned bad0 = reloc_bad, w0 = port_reloc_words;
+    port_dma_loaded(dst, s->rom_start, s->rom_end - s->rom_start);
+    port_log("[mem] %s: ROM 0x%X..0x%X -> 0x%08X (bss 0x%X bytes), %u words relocated, %u bad\n", name, s->rom_start,
+             s->rom_end, s->vram_start, s->bss_end > s->bss_start ? s->bss_end - s->bss_start : 0,
+             port_reloc_words - w0, reloc_bad - bad0);
+    return reloc_bad != bad0;
 }
+
 
 /* ---------------------------------------------------------------- helpers called by vbe.py-rewritten IR */
 unsigned short __vbe_ld16u(const unsigned char *p) { return (unsigned short)(vbe_ld8(p) << 8 | vbe_ld8(p + 1)); }

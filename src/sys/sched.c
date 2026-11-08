@@ -7,7 +7,19 @@
 #include "PR/rcp.h"
 
 typedef struct {
-    u32 unk_b80 : 1;      // b0 0 80 => unknown game control (arg2 & 0x1) [aa & resamp enabled?]
+#ifdef PORT /* wasm port: bitfields LSB first (IDO allocates from the MSB; include/common_structs.h) */
+    u32 pad_b9 : 23;
+    u32 divot : 1;
+    u32 ditherFilter : 1;
+    u32 gammaDither : 1;
+    u32 unk_b04 : 1;
+    u32 blackout : 1;
+    u32 gamma : 1;
+    u32 pixelSize32 : 1;
+    u32 serrate : 1;
+    u32 unk_b80 : 1;
+#else
+    u32 unk_b80 : 1;     // b0 0 80 => unknown game control (arg2 & 0x1) [aa & resamp enabled?]
     u32 serrate : 1;      // b1 0 40 => serrate enabled (bool)
     u32 pixelSize32 : 1;  // b2   20 => type_32 enabled
     u32 gamma : 1;        // b3   10 => gamma on
@@ -17,6 +29,7 @@ typedef struct {
     u32 ditherFilter : 1; // b7   01 => dither filter
     u32 divot : 1;        // b8 1 80 => divot on
                           // b9 1 40
+#endif
 } ViSettings;
 
 SCClient* scClientList;

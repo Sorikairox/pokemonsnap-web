@@ -3,11 +3,19 @@
 
 typedef struct Unk800E1510 {
     PhotoData* unk_0;
+#ifdef PORT /* wasm port: bitfields LSB first (IDO allocates from the MSB; include/common_structs.h) */
+    u32 unk_04_20 : 21;
+    u32 unk_04_31 : 8;
+    u32 unk_04_21 : 1;
+    u32 unk_04_22 : 1;
+    u32 unk_04_23 : 1;
+#else
     u32 unk_04_23 : 1;
     u32 unk_04_22 : 1;
     u32 unk_04_21 : 1;
     u32 unk_04_31 : 8;
     u32 unk_04_20 : 21;
+#endif
 } Unk800E1510;
 
 // .bss

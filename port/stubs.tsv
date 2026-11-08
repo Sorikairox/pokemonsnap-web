@@ -1,69 +1,9 @@
 # kind	name	signature / address	referenced by   (port/tools/gen_stubs.py: every symbol the wasm link needs that no port object defines; names only)
-func-stub	__osContRamRead	int __osContRamRead(void * a0, int a1, int a2, void * a3)	src/sys/cont
-func-stub	__osContRamWrite	int __osContRamWrite(void * a0, int a1, int a2, void * a3, int a4)	src/sys/cont
-func-stub	__osGetActiveQueue	void * __osGetActiveQueue(void)	src/sys/error
-func-stub	__osMotorAccess	int __osMotorAccess(void * a0, int a1)	src/sys/cont
-func-stub	__osSetWatchLo	void __osSetWatchLo(int a0)	src/sys/main
-func-stub	osAiSetFrequency	int osAiSetFrequency(int a0)	src/sys/audio
-func-stub	osAiSetNextBuffer	int osAiSetNextBuffer(void * a0, int a1)	src/sys/audio
-func-stub	osCartRomInit	void * osCartRomInit(void)	src/sys/main
-func-stub	osContGetQuery	void osContGetQuery(void * a0)	src/sys/cont
-func-stub	osContGetReadData	void osContGetReadData(void * a0)	src/sys/cont
-func-stub	osContInit	int osContInit(void * a0, void * a1, void * a2)	src/sys/cont
-func-stub	osContStartQuery	int osContStartQuery(void * a0)	src/sys/cont
-func-stub	osContStartReadData	int osContStartReadData(void * a0)	src/sys/cont
-func-stub	osCreateMesgQueue	void osCreateMesgQueue(void * a0, void * a1, int a2)	src/app_level/pokemon_detect (+10)
-func-stub	osCreatePiManager	void osCreatePiManager(int a0, void * a1, void * a2, int a3)	src/sys/main
-func-stub	osCreateThread	void osCreateThread(void * a0, int a1, void * a2, void * a3, void * a4, int a5)	src/credits/A93460 (+3)
-func-stub	osCreateViManager	void osCreateViManager(int a0)	src/sys/main
-func-stub	osDestroyThread	void osDestroyThread(void * a0)	src/credits/A93460 (+1)
-func-stub	osDpSetNextBuffer	int osDpSetNextBuffer(void * a0, long long a1)	src/sys/sched
-func-stub	osEPiStartDma	int osEPiStartDma(void * a0, void * a1, int a2)	src/sys/audio (+1)
-func-stub	osFlashAllErase	int osFlashAllErase(void)	src/more_funcs/5D500
-func-stub	osFlashInit	void * osFlashInit(void)	src/more_funcs/5D500
-func-stub	osFlashReadArray	int osFlashReadArray(void * a0, int a1, int a2, void * a3, int a4, void * a5)	src/more_funcs/5D500
-func-stub	osFlashReadId	void osFlashReadId(void * a0, void * a1)	src/more_funcs/5D500
-func-stub	osFlashSectorErase	int osFlashSectorErase(int a0)	src/more_funcs/5D500
-func-stub	osFlashWriteArray	int osFlashWriteArray(int a0)	src/more_funcs/5D500
-func-stub	osFlashWriteBuffer	int osFlashWriteBuffer(void * a0, int a1, void * a2, void * a3)	src/more_funcs/5D500
-func-stub	osGbpakCheckConnector	int osGbpakCheckConnector(void * a0, void * a1)	src/sys/cont
-func-stub	osGbpakInit	int osGbpakInit(void * a0, void * a1, int a2)	src/sys/cont
-func-stub	osGbpakPower	int osGbpakPower(void * a0, int a1)	src/sys/cont
-func-stub	osGbpakReadId	int osGbpakReadId(void * a0, void * a1, void * a2)	src/sys/cont
-func-stub	osGbpakReadWrite	int osGbpakReadWrite(void * a0, int a1, int a2, void * a3, int a4)	src/sys/cont
-func-stub	osGetCount	int osGetCount(void)	src/sys/audio (+2)
-func-stub	osGetThreadPri	int osGetThreadPri(void * a0)	src/sys/error
-func-stub	osGetTime	long long osGetTime(void)	src/more_funcs/5BF20 (+5)
-func-stub	osInitialize	void osInitialize(void)	src/sys/main
-func-stub	osInvalDCache	void osInvalDCache(void * a0, int a1)	src/app_level/pokemon_detect (+6)
-func-stub	osInvalICache	void osInvalICache(void * a0, int a1)	src/sys/dma
-func-stub	osMotorInit	int osMotorInit(void * a0, void * a1, int a2)	src/sys/cont
-func-stub	osPfsFileState	int osPfsFileState(void * a0, int a1, void * a2)	src/sys/cont
-func-stub	osPfsInitPak	int osPfsInitPak(void * a0, void * a1, int a2)	src/sys/cont
-func-stub	osRecvMesg	int osRecvMesg(void * a0, void * a1, int a2)	src/app_level/pokemon_detect (+10)
-func-stub	osSendMesg	int osSendMesg(void * a0, void * a1, int a2)	src/app_level/pokemon_detect (+7)
-func-stub	osSetEventMesg	void osSetEventMesg(int a0, void * a1, void * a2)	src/sys/cont (+2)
-func-stub	osSetIntMask	int osSetIntMask(int a0)	src/app_level/envsound (+6)
-func-stub	osSetThreadPri	void osSetThreadPri(void * a0, int a1)	src/credits/A93460 (+2)
-func-stub	osSetTime	void osSetTime(long long a0)	src/sys/error
-func-stub	osSpTaskLoad	void osSpTaskLoad(void * a0)	src/sys/sched
-func-stub	osSpTaskStartGo	void osSpTaskStartGo(void * a0)	src/sys/sched
-func-stub	osSpTaskYield	void osSpTaskYield(void)	src/sys/sched
-func-stub	osSpTaskYielded	int osSpTaskYielded(void * a0)	src/sys/sched
-func-stub	osStartThread	void osStartThread(void * a0)	src/credits/A93460 (+3)
-func-stub	osStopThread	void osStopThread(void * a0)	src/credits/A93460 (+1)
-func-stub	osViBlack	void osViBlack(int a0)	src/sys/sched
-func-stub	osViGetCurrentFramebuffer	void * osViGetCurrentFramebuffer(void)	src/sys/error (+1)
-func-stub	osViGetNextFramebuffer	void * osViGetNextFramebuffer(void)	src/sys/sched
-func-stub	osViSetEvent	void osViSetEvent(void * a0, void * a1, int a2)	src/sys/sched
-func-stub	osViSetMode	void osViSetMode(void * a0)	src/sys/sched
-func-stub	osViSetYScale	void osViSetYScale(float a0)	src/sys/sched
-func-stub	osViSwapBuffer	void osViSwapBuffer(void * a0)	src/sys/sched
-func-stub	osVirtualToPhysical	int osVirtualToPhysical(void * a0)	src/sys/audio (+3)
-func-stub	osWritebackDCache	void osWritebackDCache(void * a0, int a1)	src/app_render/46270 (+6)
-func-stub	osWritebackDCacheAll	void osWritebackDCacheAll(void)	src/app_level/pokemon_detect (+5)
+libc	abort	emscripten libc (host byte order: check before use on game memory)	port/ultra/pc_os
+libc	atoi	emscripten libc (host byte order: check before use on game memory)	port/boot/main
 libc	free	emscripten libc (host byte order: check before use on game memory)	port/ultra/pc_mem
 libc	malloc	emscripten libc (host byte order: check before use on game memory)	port/ultra/pc_mem
+libc	qsort	emscripten libc (host byte order: check before use on game memory)	port/ultra/pc_icall
 libc	stderr	emscripten libc (host byte order: check before use on game memory)	port/ultra/pc_mem
 libc	strcmp	emscripten libc (host byte order: check before use on game memory)	port/boot/main (+2)
 libc	vfprintf	emscripten libc (host byte order: check before use on game memory)	port/ultra/pc_mem
