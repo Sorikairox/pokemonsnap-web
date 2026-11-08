@@ -1591,6 +1591,16 @@ src/oaks_lab/8AAF60.c	func_800E61B4_8AB9D4	3	0	call:func_800BFC5C_5CAFC;call:ohW
 src/oaks_lab/8AAF60.c	func_800E6404_8ABC24	1	0	set
 src/oaks_lab/8AAF60.c	func_800E6410_8ABC30	1	1	call:func_800A9F10
 src/oaks_lab/8AAF60.c	func_800E66B8_8ABED8	1	0	entry
+src/os/osFlash.c	osFlashAllErase	1	0	set
+src/os/osFlash.c	osFlashClearStatus	1	1	call:osEPiWriteIo
+src/os/osFlash.c	osFlashInit	1	0	set
+src/os/osFlash.c	osFlashReInit	1	0	set
+src/os/osFlash.c	osFlashReadArray	1	0	set
+src/os/osFlash.c	osFlashReadId	1	1	call:osRecvMesg
+src/os/osFlash.c	osFlashReadStatus	1	1	call:osEPiReadIo
+src/os/osFlash.c	osFlashSectorErase	1	0	set
+src/os/osFlash.c	osFlashWriteArray	1	0	set
+src/os/osFlash.c	osFlashWriteBuffer	1	0	set
 src/photo_check/98C330.c	func_801DC8C0_98C330	1	0	entry
 src/photo_check/98C330.c	func_801DC904_98C374	1	0	entry
 src/photo_check/98C330.c	func_801DCA14_98C484	0	0	

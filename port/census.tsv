@@ -504,6 +504,7 @@ src/oaks_lab/8A7360.c	oaks_lab	game	compile	21	ok
 src/oaks_lab/8A8A50.c	oaks_lab	game	compile	7	ok
 src/oaks_lab/8A9CC0.c	oaks_lab	game	compile	24	ok
 src/oaks_lab/8AAF60.c	oaks_lab	game	compile	11	ok
+src/os/osFlash.c	more_funcs	game	compile	10	ok
 src/photo_check/98C330.c	photo_check	game	compile	40	ok
 src/photo_check/993C50.c	photo_check	game	compile	6	ok
 src/photo_check/993F80.c	photo_check	game	compile	13	ok
@@ -667,7 +668,6 @@ src/volcano/world/world_gfx.c	volcano_assets	game-data	compile	0	ok
 src/world/evolution_controller/materials.c	world	game-data	compile	0	ok
 src/world/gate/materials.c	world	game-data	compile	0	ok
 src/app_render/52DE0.c	app_render	game-mixed	compile	15	ok
-src/os/osFlash.c	more_funcs	pc-replaced	pc	10	-
 assets/29A1A0.bin	river_assets	rom-bin	rom	0	-
 assets/3F63E0.bin	valley_assets	rom-bin	rom	0	-
 assets/4A8170.bin	rainbow_assets	rom-bin	rom	0	-

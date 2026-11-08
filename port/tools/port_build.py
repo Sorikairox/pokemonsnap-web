@@ -51,7 +51,7 @@ VERSION_J = {'aisetfreq', 'cartrominit', 'contpfs', 'contramread', 'contramwrite
 ULTRA_COMPILE = ('ultralib/src/gu/', 'ultralib/src/libc/', 'ultralib/src/audio/', 'ultralib/src/sp/',
                  'ultralib/src/vimodes/')
 # game TUs that are libultra replaced by the PC layer
-PC_REPLACED = {'src/os/osFlash.c': 'FlashRAM driver (PC layer: native flash image, S8)'}
+PC_REPLACED = {}  # S8: src/os/osFlash.c (the game's FlashRAM driver) is compiled; the chip is port/save/flashram.c
 
 ACTIONS = {  # category -> (action, what happens to it)
     'game': ('compile', 'game C, compiled through vbe'),
@@ -496,7 +496,8 @@ def main():
     # phase 5: PC layer (native)
     pc_srcs = sorted(f'port/ultra/{f}' for f in os.listdir('port/ultra') if f.endswith('.c')) + \
         sorted(f'port/boot/{f}' for f in os.listdir('port/boot') if f.endswith('.c')) + \
-        sorted(f'port/gfx/{f}' for f in os.listdir('port/gfx') if f.endswith('.c'))   # S3c: the renderer
+        sorted(f'port/gfx/{f}' for f in os.listdir('port/gfx') if f.endswith('.c')) + \
+        sorted(f'port/save/{f}' for f in os.listdir('port/save') if f.endswith('.c'))   # S3c: the renderer; S8: save
     ovl_secs = sorted({meta[s][1] for s, msg in status.items() if meta[s][1] != '-' and 'ovlglob=' in msg})
     segtab_c = gen_segments(ovl_secs)
     import icall_gen
@@ -536,7 +537,7 @@ def main():
         '-sEXPORT_NAME=createPokemonSnap', '-sINVOKE_RUN=0', '-sEXIT_RUNTIME=0', '-sENVIRONMENT=worker,node',
         '-sERROR_ON_UNDEFINED_SYMBOLS=1', '-sEXPORTED_FUNCTIONS=_main,_malloc,_free,_port_set_rom,_port_stub_report,_port_vi_retrace,_port_set_pad,'
         '_port_flash_image,_port_flash_generation,_port_gfx_log_stats,_port_gfx_set_log_ops,_port_rb_record,_port_rb_journal,'
-        '_port_rb_journal_size,_port_rb_load,_port_rb_point_count',
+        '_port_rb_journal_size,_port_rb_load,_port_rb_point_count,_port_save_load,_port_save_poll,_rtw_save_ptr,_rtw_save_size,_rtw_save_generation',
         '-sEXPORTED_RUNTIME_METHODS=HEAPU8,HEAP32,callMain', '--profiling-funcs',
         '--js-library', 'port/gfx/gfx_gl.js', '-sMAX_WEBGL_VERSION=2', '-sMIN_WEBGL_VERSION=2',   # S3c: renderer
         '-Wl,--error-limit=0', f'-Wl,-Map={OUT}/pokemonsnap.map']
