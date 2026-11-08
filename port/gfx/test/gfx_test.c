@@ -498,6 +498,12 @@ unsigned char *gfx_test_run2(void) {
     texrect_1cyc(&g, 110, 10, 32, 32, 1 << 9);
     gDPLoadTextureBlock(g++, 0x06002500, G_IM_FMT_RGBA, G_IM_SIZ_16b, 16, 16, 0, G_TX_MIRROR | G_TX_WRAP, G_TX_CLAMP, 4, G_TX_NOMASK, G_TX_NOLOD, G_TX_NOLOD);
     texrect_1cyc(&g, 160, 10, 64, 16, 1 << 10);   /* 64 texels across a 16-texel mirrored tile */
+    /* R1 (Beach cliffs): the same TMEM drawn first with a 16x16 clamped tile, then with a 64x16 tile size (clamp bit
+     * + mask 16: wraps every 16 texels inside the tile). The second draw must wrap, not reuse the clamped texture */
+    gDPLoadTextureBlock(g++, 0x06002500, G_IM_FMT_RGBA, G_IM_SIZ_16b, 16, 16, 0, G_TX_CLAMP, G_TX_CLAMP, 4, 4, G_TX_NOLOD, G_TX_NOLOD);
+    texrect_1cyc(&g, 160, 110, 16, 16, 1 << 10);
+    gDPSetTileSize(g++, G_TX_RENDERTILE, 0, 0, 63 << 2, 15 << 2);
+    texrect_1cyc(&g, 160, 130, 64, 16, 1 << 10);
     /* 2-cycle: (TEXEL1 - TEXEL0) * ENV_ALPHA + TEXEL0, then * SHADE (white) */
     gDPPipeSync(g++);
     gDPSetCycleType(g++, G_CYC_2CYCLE);
@@ -571,6 +577,11 @@ unsigned char *gfx_test_run2(void) {
     check("i4", p == rgba16(153, 153, 153, 1), "%04X (I 9 * 17)", p);
     uint16_t m1 = fb_px(FB2_PHYS, 320, 160 + 17, 12), m2 = fb_px(FB2_PHYS, 320, 160 + 30, 12), m0 = fb_px(FB2_PHYS, 320, 161, 12);
     check("mirror", m0 == rgba16(255, 0, 0, 1) && m1 == rgba16(0, 0, 255, 1) && m2 == rgba16(255, 0, 0, 1), "%04X %04X %04X", m0, m1, m2);
+    {
+        uint16_t c0 = fb_px(FB2_PHYS, 320, 160 + 20, 112), w0 = fb_px(FB2_PHYS, 320, 160 + 20, 132), w1 = fb_px(FB2_PHYS, 320, 160 + 28, 132);
+        check("tile_resize_wrap", c0 == rgba16(40, 40, 40, 1) && w0 == rgba16(255, 0, 0, 1) && w1 == rgba16(0, 0, 255, 1),
+              "first rect ends at 16 (%04X), second wraps: texel 20 = 4 %04X (red), texel 28 = 12 %04X (blue)", c0, w0, w1);
+    }
     p = fb_px(FB2_PHYS, 320, 30, 80);
     check("two_cycle_texel1", (p >> 11) >= 14 && (p >> 11) <= 17 && ((p >> 1) & 31) >= 14 && ((p >> 1) & 31) <= 17 && ((p >> 6) & 31) == 0, "%04X (half red, half blue)", p);
     uint16_t a = fb_px(FB2_PHYS, 320, 15, 185), b = fb_px(FB2_PHYS, 320, 115, 185), c = fb_px(FB2_PHYS, 320, 175, 185), d = fb_px(FB2_PHYS, 320, 65, 185);

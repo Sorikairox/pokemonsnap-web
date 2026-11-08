@@ -528,6 +528,10 @@ static void tile_dims(const Tile *tl, int *w, int *h, GLint *ws, GLint *wt) {
 static uint32_t tile_desc(const Tile *tl) {
     return tl->fmt | tl->siz << 3 | tl->line << 5 | tl->tmem << 14 | tl->palette << 23 | tlut_mode() << 27 | tl->cms << 29;
 }
+/* the decoded texels of tile ti (w x h, from tile_dims). Wrap / mirror / clamp are sampler state, set by the caller at
+ * every bind: one decoded texture serves tiles that differ only in their size or clamp bits (R1: the Beach cliffs set
+ * a 64x64 tile size, load, then a 512x128 one over the same TMEM; the texture made for the first, clamped, was reused
+ * by the fast path below for the second and every texel past the first 64 sampled the edge column: flat grey) */
 static GLuint tile_texture(int ti, int *pw, int *ph) {
     Tile *tl = &tiles[ti & 7];
     int w, h;
@@ -547,7 +551,7 @@ static GLuint tile_texture(int ti, int *pw, int *ph) {
         for (unsigned i = 0; i < pn; i += 8) { hsh ^= tmem[(p0 + i) & 0xFFF] << 8 | tmem[(p0 + i + 1) & 0xFFF]; hsh *= 16777619u; }
     }
     if (tl->fmt == FMT_YUV) { for (int k = 0; k < 4; k++) { hsh ^= (uint32_t)conv_k[k]; hsh *= 16777619u; } }
-    uint32_t key[4] = {hsh, desc, (uint32_t)w | (uint32_t)h << 16, (uint32_t)ws << 16 ^ (uint32_t)wt ^ tl->cmt << 30};
+    uint32_t key[4] = {hsh, desc, (uint32_t)w | (uint32_t)h << 16, 0};
     unsigned slot = (hsh ^ desc * 31u) % TEX_CACHE;
     TexEnt *victim = 0;
     for (unsigned probe = 0; probe < 8; probe++) {
@@ -571,8 +575,6 @@ static GLuint tile_texture(int ti, int *pw, int *ph) {
     glBindTexture(GL_TEXTURE_2D, tex);
     glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, px);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, ws);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, wt);
     free(px);
     memcpy(victim->key, key, sizeof key);
     victim->tex = tex; victim->w = w; victim->h = h; victim->stamp = ++tex_clock;
@@ -1156,6 +1158,8 @@ static int begin_batch(int kind, int tile) {
             int dw, dh;
             GLint ws, wt;
             tile_dims(&tiles[ti & 7], &dw, &dh, &ws, &wt);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, ws);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, wt);
         }
         unsigned filt = (om_h >> OMH_TEXTFILT_SFT) & 3;
         GLint f = (cyc == CYC_COPY || filt == 0) ? GL_NEAREST : GL_LINEAR;
