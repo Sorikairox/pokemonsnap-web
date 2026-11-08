@@ -6,6 +6,7 @@ libc	malloc	emscripten libc (host byte order: check before use on game memory)	p
 libc	qsort	emscripten libc (host byte order: check before use on game memory)	port/ultra/pc_icall
 libc	stderr	emscripten libc (host byte order: check before use on game memory)	port/ultra/pc_mem
 libc	strcmp	emscripten libc (host byte order: check before use on game memory)	port/boot/main (+2)
+libc	strtol	emscripten libc (host byte order: check before use on game memory)	port/boot/main
 libc	vfprintf	emscripten libc (host byte order: check before use on game memory)	port/ultra/pc_mem
 mirror-label	D_800AC0F0	0x800AC0F0 size 0x4	src/app_render/47380
 mirror-label	D_800AC0F4	0x800AC0F4 size 0x2C	src/app_render/47380
