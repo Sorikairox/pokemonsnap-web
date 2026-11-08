@@ -12,5 +12,7 @@
   },
   "video": "webgl",
   "hz": 60,
-  "save": { "kind": "flash", "size": 131072 }
+  "save": { "kind": "flash", "size": 131072 },
+  "license": "MIT",
+  "source": "https://github.com/Sorikairox/pokemonsnap-web"
 }
