@@ -225,7 +225,110 @@ def summarize_warnings(stderr):
     return ' '.join(f'{k[2:]}={v}' for k, v in c.most_common())
 
 
-TOOLS = ['port/tools/vbe.py', 'port/tools/sigs.py', 'port/tools/icall.py']
+TOOLS = ['port/tools/vbe.py', 'port/tools/sigs.py', 'port/tools/icall.py', 'port/tools/v0.py']
+
+
+def v0_plan(ok, defs, sites, can):
+    """S5 (port/tools/v0.py): decide which void functions return the callee result the console leaves in v0;
+    mark them in `can` (canonical return i32, and can['__v0__'] = {tag: [names promoted in that TU]}), and write
+    port/v0_report.tsv: every void function, how it is called for a value and what it then returns."""
+    import v0, sigs
+    mips = {}
+    for r in tsv(f'{SYM}/v0.tsv'):
+        tu, fn, nret, callonly, srcs = r
+        mips[(tu, '@' + fn)] = (callonly == '1', set(srcs.split(';')) if srcs else set())
+    voids = {}       # (src, name) -> (internal, ir sources, params)
+    iret = {}        # (src, name) -> return type of internal functions
+    vdefs = {n for n, d in defs.items() if d[0] == 'void'}
+    used = collections.Counter()   # void function -> direct call sites whose (non-void) result the caller uses
+    for src in ok:
+        lines = open(f'{LL}/{tag_of(src)}.ll').read().split('\n')
+        fns = v0.functions(lines)
+        for name, (i0, i1) in fns.items():
+            body = lines[i0 + 1:i1]
+            for j, l in enumerate(body):
+                ci = v0.call_info(l)
+                if ci and ci[0] and ci[1] != 'void' and ci[2] in vdefs:
+                    pat = re.compile(re.escape(ci[0]) + r'(?![\w.$-])')
+                    if any(pat.search(x) for x in body[j + 1:]):
+                        used[ci[2]] += 1
+        for name, (i0, i1) in fns.items():
+            d = sigs.parse_define(lines[i0])
+            if not d:
+                continue
+            internal = 'internal' in d[1] or 'private' in d[1]
+            if internal:
+                iret[(src, name)] = d[2]
+            if d[2] != 'void':
+                continue
+            rets = v0.analyse(lines[i0 + 1:i1])
+            voids[(src, name)] = (internal, frozenset().union(*rets) if rets else frozenset(), len(rets))
+
+    def why_not(key):
+        src, name = key
+        internal, irs, nret = voids[key]
+        m = mips.get(key)
+        if m is None:
+            return 'no IDO object row'
+        if not m[0]:
+            bad = sorted(x for x in m[1] if not x.startswith('call:'))
+            return 'console v0 not only a call result (' + ','.join(bad) + ')'
+        ms = {('@' + x[5:]) if x.startswith('call:') else x for x in m[1]}
+        # a path the C allows but the compiled code proved impossible (a loop that always runs once, IDO rotated it)
+        # shows as `entry` in the IR only: v0 there is never read, the port returns 0 on it
+        if ms != set(irs) - {'entry'}:
+            return f'IR last calls {sorted(irs)} differ from the console {sorted(ms)}'
+        return ''
+    cand = {k: why_not(k) for k in voids}
+    prom = set()
+
+    def valued(x, src):
+        if x == 'icall':
+            return False
+        if (src, x) in iret:
+            return iret[(src, x)] in v0.V0_TYPES or (src, x) in prom
+        if x in can and can[x][0] in v0.V0_TYPES:
+            return True
+        return any(k[1] == x and not voids[k][0] for k in prom)
+    changed = True
+    while changed:
+        changed = False
+        for k, why in cand.items():
+            if why or k in prom:
+                continue
+            if all(valued(x, k[0]) for x in voids[k][1]):
+                prom.add(k)
+                changed = True
+    per = collections.defaultdict(list)
+    for src, name in sorted(prom):
+        per[tag_of(src)].append(name)
+        if not voids[(src, name)][0] and name in can:
+            can[name] = ['i32'] + list(can[name][1:2]) + [''] + list(can[name][3:4])
+    can['__v0__'] = {t: sorted(v) for t, v in per.items()}
+    can['__v0_ext__'] = sorted(n for s, n in prom if not voids[(s, n)][0])
+    rows = []
+    for k in sorted(voids):
+        src, name = k
+        internal, irs, nret = voids[k]
+        vsites = 0 if internal else used[name]
+        m = mips.get(k)
+        con = ';'.join(sorted(m[1])) if m else '-'
+        if k in prom:
+            res = 'returns v0: ' + ' / '.join(sorted(x.lstrip('@') for x in irs))
+        else:
+            why = cand[k] or 'a callee does not leave a value in v0 (' + ','.join(sorted(x.lstrip('@') for x in irs if not valued(x, src))) + ')'
+            res = 'void (a value read reads 0): ' + why
+        rows.append(f'{src}\t{name.lstrip("@")}\t{"static" if internal else "global"}\t{vsites}\t{con}\t{res}\n')
+    nval = sum(1 for r in rows if r.split('\t')[3] != '0')
+    write_if_changed('port/v0_report.tsv', '# tu\tfunction\tlinkage\tdirect_sites_using_the_value\tconsole_v0_at_return\tport   '
+                     '(port_build.py v0_plan, port/tools/v0.py: every void function of the game C; console v0 from '
+                     'port/symbols/v0.tsv; promoted functions return that v0, the others read 0 where a caller uses a '
+                     'value: direct sites counted here, indirect ones are logged at run time as [icall] void target)\n'
+                     + ''.join(rows))
+    bad = [r for r in rows if r.split('\t')[3] != '0' and 'returns v0' not in r]
+    print(f'v0: {len(voids)} void functions, {len(prom)} return the v0 of their last call; {nval} with direct value '
+          f'sites ({len(bad)} of them read 0: port/v0_report.tsv)')
+    return len(prom), len(voids)
 FVRAM = f'{OUT}/fvram'
 
 
@@ -264,7 +367,8 @@ def build_obj(src, sig_hash, abs_hash, meta):
     if os.path.exists(kf):
         os.remove(kf)
     p = subprocess.run([sys.executable, 'port/tools/vbe.py', ll, vll, f'{OUT}/sigdb.json', f'{OUT}/abs_syms.txt',
-                        fv, sec], capture_output=True, text=True)
+                        fv, sec], capture_output=True, text=True,
+                       env=dict(os.environ, PYTHONDONTWRITEBYTECODE='1'))   # S5: parallel vbe.py runs raced on .pyc
     if p.returncode:
         return src, 2, p.stderr[-3000:], True
     stats = p.stdout.strip().split(' ', 1)[1] if ' ' in p.stdout.strip() else ''
@@ -343,6 +447,8 @@ def main():
         for src in ok:
             sigs.scan(open(f'{LL}/{tag_of(src)}.ll').read(), defs, sites)
         can = sigs.canonical(defs, sites)
+        # S5: void functions that leave a callee's result in v0 return it (port/tools/v0.py)
+        nprom, nvoid = v0_plan(ok, defs, sites, can)
         write_if_changed(f'{OUT}/sigdb.json', json.dumps(can, sort_keys=True))
         mism = sorted(f for f, c in sites.items() if len(c) > 1 or
                       (f in defs and json.dumps(list(defs[f])[:2]) not in c))

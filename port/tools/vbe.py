@@ -591,7 +591,22 @@ def main():
             n, v = l.split()
             absmap[n] = int(v, 16)
     st0 = collections.Counter()
-    text = RENAME.sub(r'@vbe.\1', open(src).read())
+    text = open(src).read()
+    if sigdb:   # S5: void functions returning their last callee's v0 (port/tools/v0.py; plan from port_build.py)
+        import json, v0
+        db = json.load(open(sigdb))
+        mine = db.get('__v0__', {}).get(os.path.basename(src)[:-3], [])
+        allp = set(db.get('__v0_ext__', [])) | set(mine)
+        lines = text.split('\n')
+        n = 0
+        for f in mine:
+            lines, n = v0.promote(lines, f, allp, n)
+            st0['v0_promoted'] += 1
+        internal = {f for f in mine if f not in db.get('__v0_ext__', [])}
+        if internal:
+            lines = v0.rewrite_internal_sites(lines, internal)
+        text = '\n'.join(lines)
+    text = RENAME.sub(r'@vbe.\1', text)
     text = fptr_eq(k0_ptrs(rcp_io(abs_syms(text, absmap, st0), st0), st0), st0)
     p = Pass(text.split('\n'))
     p.st.update(st0)

@@ -100,9 +100,21 @@ def trampoline(name, ret, params):
          '  %s = call i32 @__port_fsig(ptr %fp)',
          f'  %m = icmp eq i32 %s, {sid}',
          '  %z = icmp eq i32 %s, 0',
-         '  %f = or i1 %m, %z',
-         '  br i1 %f, label %fast, label %slow',
-         'fast:']
+         '  %f = or i1 %m, %z']
+    if ret == 'void':
+        # S5: a void site may call a void function that port/tools/v0.py made return its v0 (i32): same parameters,
+        # the result dropped, no conversion needed
+        alt = sig_id('i:' + ws.split(':')[1])
+        L += ['  br i1 %f, label %fast, label %alt',
+              'alt:',
+              f'  %ma = icmp eq i32 %s, {alt}',
+              '  br i1 %ma, label %fasti, label %slow',
+              'fasti:',
+              f'  %ri = call i32 %fp({actual})',
+              '  ret void',
+              'fast:']
+    else:
+        L += ['  br i1 %f, label %fast, label %slow', 'fast:']
     if ret == 'void':
         L += [f'  call void %fp({actual})', '  ret void']
     else:

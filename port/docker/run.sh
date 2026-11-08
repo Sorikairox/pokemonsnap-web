@@ -6,6 +6,7 @@
 #   port/docker/run.sh build            configure.py --clean (splat extraction) + ninja + checksum (build/pokemonsnap.ok)
 #   port/docker/run.sh symbols          port/symbols/*.tsv from build/pokemonsnap.map + .elf, and the asset-TU list
 #   port/docker/run.sh relocs           port/symbols/relocs.tsv from the build objects' data relocations (needs port/census.tsv)
+#   port/docker/run.sh v0               port/symbols/v0.tsv: v0 at every return of the compiled TUs' IDO objects (S5)
 #   port/docker/run.sh sh [cmd...]      shell (or a command) in the toolchain container
 # Port (wasm32) build, in the pokemonsnap-emsdk container (port/docker/Dockerfile.emsdk):
 #   port/docker/run.sh port-image       build the port image (from the local emscripten/emsdk:4.0.15-arm64)
@@ -37,6 +38,7 @@ build)
   link_tools
   run bash -c 'python3 configure.py --clean && ninja';;
 relocs) run python3 port/tools/gen_relocs.py;;
+v0) run python3 port/tools/v0_scan.py;;
 symbols)
   run python3 port/tools/gen_symbols.py
   run python3 port/tools/asset_tus.py;;
@@ -48,5 +50,5 @@ port) prun python3 port/tools/port_build.py;;
 port-test) shift; prun node port/tools/node_run.js port/build/web/pokemonsnap.js pokemonsnap.z64 "$@";;
 port-sh) shift; if [ $# -eq 0 ]; then docker run --rm -it -v "$ROOT":/src -w /src "$PIMG" bash; else prun "$@"; fi;;
 sh) shift; if [ $# -eq 0 ]; then docker run --rm -it -v "$ROOT":/src -w /src "$IMG" bash; else run "$@"; fi;;
-*) sed -n '2,14p' "$0"; exit 2;;
+*) sed -n '2,15p' "$0"; exit 2;;
 esac

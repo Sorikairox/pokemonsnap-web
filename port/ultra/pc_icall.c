@@ -129,6 +129,10 @@ void port_call_vi(void *fp, int a0) {
         ((void (*)(int))fp)(a0);
         return;
     }
+    if (s == port_sig_ii) {   /* S5: port/tools/v0.py made it return its v0 */
+        (void)((int (*)(int))fp)(a0);
+        return;
+    }
     u64_ b[1] = {(u64_)(long long)a0};
     __port_icall_slow(fp, s, b, 1, 0, 4);
 }

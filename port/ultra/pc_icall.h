@@ -21,6 +21,7 @@ const char *port_fsig_name(unsigned id);
 void port_icall_report(void);
 extern unsigned port_icall_slow_calls;
 extern const unsigned port_sig_vi;                /* sig_id("v:i") (icall_tab.c) */
+extern const unsigned port_sig_ii;                /* sig_id("i:i"): a void entry made to return its v0 (S5) */
 
 /* argument conversion: slot i of the site's register file (kind 0 i32, 1 i64, 2 f32, 3 f64) to the
  * target's parameter type; the same rules as port/tools/sigs.py conv() for direct calls */
