@@ -7,6 +7,7 @@
  * posted when no thread is runnable any more (S5, port_rcp_complete), as the RDP finishes milliseconds later on the
  * console; the audio task's SP-done is posted right away. Written for this port. */
 #include "pc_os.h"
+#include "../audio/audio.h"
 #include <emscripten.h>
 #include <emscripten/heap.h>
 #include <string.h>
@@ -60,6 +61,7 @@ void port_run_threads(void);
 /* one retrace (exported: the page calls it once per display frame at 60 Hz; node's main() loops it) */
 EMSCRIPTEN_KEEPALIVE void port_vi_retrace(void) {
     port_vi_count++;
+    port_ai_retrace(); /* S7: one retrace of DAC time (port/audio/audio_ai.c) */
     vi_cur = vi_next;
     port_vi_present(vi_cur, vi_mode, vi_black);
     if (vi_mq && ++vi_ctr >= vi_every) {
@@ -171,7 +173,7 @@ void osSpTaskStartGo(void *tv) {
          * directly and the detector never ran. */
         port_rcp_pending++;
     } else {
-        if (t->type == M_AUDTASK_) port_audio_tasks++;
+        if (t->type == M_AUDTASK_) port_audio_tasks++, port_audio_task(t); /* S7: aspMain HLE, port/audio */
         else { port_other_tasks++; port_log("[sp] task type %u\n", t->type); }
         pc_post_event(N64_EVENT_SP);
     }
@@ -187,12 +189,8 @@ int osDpSetNextBuffer(void *buf, long long size) {
     return 0;
 }
 
-/* ---------------------------------------------------------------- AI (audio output: S7) */
-int osAiSetFrequency(int f) {
-    const unsigned clock = 48681812u; /* VI_NTSC_CLOCK */
-    if (f <= 0) return 0;
-    unsigned dac = (unsigned)((double)clock / f + 0.5);
-    if (dac < 132) return -1;
-    return (int)(clock / dac);
-}
-int osAiSetNextBuffer(void *buf, int size) { (void)buf; (void)size; return 0; }
+/* ---------------------------------------------------------------- AI (S7: the virtual AI, port/audio/audio_ai.c) */
+int osAiSetFrequency(int f) { return port_ai_set_frequency(f); }
+int osAiSetNextBuffer(void *buf, int size) { return port_ai_set_next_buffer(buf, (uint32_t)size); }
+int osAiGetLength(void) { return (int)port_ai_get_length(); }
+int osAiGetStatus(void) { return (int)port_ai_get_status(); }
