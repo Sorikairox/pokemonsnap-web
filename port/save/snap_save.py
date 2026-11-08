@@ -25,6 +25,8 @@ does before writing (func_800BF10C_5BFAC: MD4_Finalize over `data`), then checks
                shows no "new course" sequence.
   --items LIST comma list of apple, pester, flute, dash (hasApple, hasPesterBall, hasFlute, hasDashEngine)
   --flag NAME=V  any single-bit flag of word 0x64 / 0x68 by the names printed by the decoder
+  --album-from-report R:A[,R:A...]  copy report photo slot R (PhotoData, 0x3A0 bytes, as the game wrote it) into album
+               slot A (AlbumPhotoData: that PhotoData + a zero comment), so the PKMN Album has real photos
 Crafted images are personal data: write them under port_work/ only.
 """
 import json
@@ -209,6 +211,14 @@ def write_main(argv):
         struct.pack_into('>i', img, 0x50, n)                                # unk_50
     for it in filter(None, (opt('--items') or '').split(',')):
         set_flag(img, ITEMS[it], 1)
+    for pair in filter(None, (opt('--album-from-report') or '').split(',')):
+        r, a = (int(x) for x in pair.split(':'))
+        src = 0x180 + r * PHOTO_SIZE
+        if not (0 <= r < 69 and 0 <= a < 60 and photo_used(img, src)):
+            raise SystemExit(f'report slot {r} is empty or out of range (or album slot {a})')
+        dst = 0x10A20 + a * ALBUM_SIZE
+        img[dst:dst + PHOTO_SIZE] = img[src:src + PHOTO_SIZE]
+        img[dst + PHOTO_SIZE:dst + ALBUM_SIZE] = bytes(ALBUM_SIZE - PHOTO_SIZE)
     for i, a in enumerate(argv):
         if a == '--flag':
             k, v = argv[i + 1].split('=')
