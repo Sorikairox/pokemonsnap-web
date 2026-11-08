@@ -1152,6 +1152,11 @@ static int begin_batch(int kind, int tile) {
         glActiveTexture(GL_TEXTURE0 + u);   /* before tile_texture: a new texture is created on the active unit */
         GLuint tex = tile_texture(ti, &w, &h);
         glBindTexture(GL_TEXTURE_2D, tex);
+        {
+            int dw, dh;
+            GLint ws, wt;
+            tile_dims(&tiles[ti & 7], &dw, &dh, &ws, &wt);
+        }
         unsigned filt = (om_h >> OMH_TEXTFILT_SFT) & 3;
         GLint f = (cyc == CYC_COPY || filt == 0) ? GL_NEAREST : GL_LINEAR;
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, f);
@@ -1182,8 +1187,50 @@ static void put_vtx(float x, float y, float z, float w, const float *col, float 
     batch_n++;
 }
 
+/* debug (port_gfx_set_probe): while commands are logged, every primitive covering the probe pixel (N64 pixels of the
+ * current colour image) is logged with the state it is drawn with */
+static float probe_x = -1, probe_y = -1;
+void port_gfx_set_probe(int x, int y) { probe_x = (float)x + 0.5f; probe_y = (float)y + 0.5f; }
+static void probe_state(void) {
+    for (int i = 0; i < 8; i++) {
+        const Tile *tl = &tiles[i];
+        port_log("[probe]   tile %d fmt %u siz %u line %u tmem %u pal %u cms %u masks %u shifts %u cmt %u maskt %u shiftt %u "
+                 "(%.2f,%.2f)-(%.2f,%.2f)\n", i, tl->fmt, tl->siz, tl->line, tl->tmem, tl->palette, tl->cms, tl->masks,
+                 tl->shifts, tl->cmt, tl->maskt, tl->shiftt, tl->uls / 4.0, tl->ult / 4.0, tl->lrs / 4.0, tl->lrt / 4.0);
+    }
+    port_log("[probe]   omh %08X oml %08X cc %08X %08X prim %08X env %08X fog %08X geom %08X tex on %d tile %d lvl %d\n",
+             om_h, om_l, cc_w0, cc_w1, prim_color, env_color, fog_color, gfx_geom, gfx_tex_on, gfx_tex_tile, gfx_tex_level);
+}
+static void probe_tri(const GfxVtx *v[3]) {
+    if (probe_x < 0 || !gfx_log_ops) return;
+    /* homogeneous 2D rasterisation (no clipping needed): e_i = (v_j x v_k) . (px, py, 1), inside when all e_i have
+     * the sign of det = v_0 . (v_1 x v_2) */
+    double V[3][3], e[3], det;
+    for (int i = 0; i < 3; i++) { V[i][0] = v[i]->x; V[i][1] = v[i]->y; V[i][2] = v[i]->w; }
+    for (int i = 0; i < 3; i++) {
+        const double *a = V[(i + 1) % 3], *b = V[(i + 2) % 3];
+        double cx = a[1] * b[2] - a[2] * b[1], cy = a[2] * b[0] - a[0] * b[2], cw = a[0] * b[1] - a[1] * b[0];
+        e[i] = cx * probe_x + cy * probe_y + cw;
+        if (i == 0) det = cx * V[0][0] + cy * V[0][1] + cw * V[0][2];
+    }
+    if (det == 0) return;
+    for (int i = 0; i < 3; i++) if (e[i] / det < 0) return;
+    port_log("[probe] tri hit (cimg %p w %u)\n", (void *)cimg.addr, cimg.width);
+    for (int i = 0; i < 3; i++)
+        port_log("[probe]   v%d scr %.2f %.2f z/w %.6f w %.2f rgba %.3f %.3f %.3f %.3f st %.2f %.2f\n", i, v[i]->x / v[i]->w,
+                 v[i]->y / v[i]->w, v[i]->z / v[i]->w, v[i]->w, v[i]->r, v[i]->g, v[i]->b, v[i]->a, v[i]->s, v[i]->t);
+    probe_state();
+}
+static void probe_rect(float x0, float y0, float x1, float y1, float s, float t, float dsdx, float dtdy) {
+    if (probe_x < 0 || !gfx_log_ops || probe_x < x0 || probe_x >= x1 || probe_y < y0 || probe_y >= y1) return;
+    port_log("[probe] rect hit (cimg %p w %u) (%.2f,%.2f)-(%.2f,%.2f) st %.2f %.2f d %.4f %.4f\n", (void *)cimg.addr,
+             cimg.width, x0, y0, x1, y1, s, t, dsdx, dtdy);
+    probe_state();
+}
+
 void rdp_tri(const GfxVtx *a, const GfxVtx *b, const GfxVtx *c) {
     if (!begin_batch(0, 0)) return;
+    { const GfxVtx *pv[3] = {a, b, c}; probe_tri(pv); }
     const GfxVtx *v[3] = {a, b, c};
     for (int i = 0; i < 3; i++) put_vtx(v[i]->x, v[i]->y, v[i]->z, v[i]->w, &v[i]->r, v[i]->s, v[i]->t);
     if (a->w > 0 && b->w > 0 && c->w > 0) {
@@ -1233,6 +1280,7 @@ void rdp_texrect(uint32_t w0, uint32_t w1, uint32_t w2, uint32_t w3, int flip) {
     if (cyc == CYC_FILL) return;
     if (lrx <= ulx || lry <= uly) return;
     if (!begin_batch(cyc == CYC_COPY ? 2 : 1, tile)) return;
+    probe_rect(ulx, uly, lrx, lry, s, t, dsdx, dtdy);
     float s1, t1;
     if (!flip) { s1 = s + dsdx * (lrx - ulx); t1 = t + dtdy * (lry - uly); }
     else { s1 = s + dsdx * (lry - uly); t1 = t + dtdy * (lrx - ulx); }

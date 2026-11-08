@@ -78,6 +78,7 @@ void rdp_end_task(void);
 int rdp_gl_ready(void);
 int rdp_target_width(void), rdp_target_height(void);
 extern int gfx_saw_fullsync;
+extern int gfx_log_ops;   /* port_gfx_set_log_ops: log every command (debug) */
 
 void gfx_log_once(unsigned key, const char *fmt, ...) __attribute__((format(printf, 2, 3)));
 #endif

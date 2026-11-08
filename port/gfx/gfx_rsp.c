@@ -14,7 +14,7 @@
 PortGfxStats port_gfx_stats;
 uint32_t gfx_geom;
 int gfx_tex_on, gfx_tex_tile, gfx_tex_level;
-static int log_ops;
+int gfx_log_ops;
 
 /* ------------------------------------------------------------------ logging */
 static uint32_t once_keys[512];
@@ -32,7 +32,7 @@ void gfx_log_once(unsigned key, const char *fmt, ...) {
     va_end(ap);
     port_log("[gfx] %s\n", buf);
 }
-void port_gfx_set_log_ops(int on) { log_ops = on; }
+void port_gfx_set_log_ops(int on) { gfx_log_ops = on; }
 
 /* ------------------------------------------------------------------ addresses
  * Address classes in this port (-sGLOBAL_BASE=256MB, the RDRAM mirror at wasm 0x10800000, MEMORY.md):
@@ -339,7 +339,7 @@ static void run_dl(uint32_t start) {
         uint32_t w0 = vbe_ld32(pc), w1 = vbe_ld32(pc + 1);
         unsigned op = w0 >> 24;
         port_gfx_stats.cmds++;
-        if (log_ops) port_log("[gfx] %p %08X %08X\n", (const void *)pc, w0, w1);
+        if (gfx_log_ops) port_log("[gfx] %p %08X %08X\n", (const void *)pc, w0, w1);
         pc += 2;
         switch (op) {
         case 0x00: break;   /* G_NOOP */
@@ -351,7 +351,7 @@ static void run_dl(uint32_t start) {
             if (i < 64) {
                 const GfxVtx *v = &vbuf[i];
                 float zs = (v->w != 0 ? v->z / v->w : 0) * vp_sz + vp_tz;
-                if (log_ops) port_log("[gfx] branch_z v%u x %f y %f z %f w %f -> screen z %f vs %f (vp z %f %f)\n", i,
+                if (gfx_log_ops) port_log("[gfx] branch_z v%u x %f y %f z %f w %f -> screen z %f vs %f (vp z %f %f)\n", i,
                                       v->x, v->y, v->z, v->w, zs, w1 / 65536.0f, vp_sz, vp_tz);
                 if (zs * 65536.0f <= (float)w1 || v->w <= 0) {
                     const uint32_t *t = (const uint32_t *)gfx_addr(rdphalf1);
