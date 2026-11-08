@@ -1388,6 +1388,25 @@ void rdp_reset_task(void) {
     cur_target = 0;
     cur_zw = 0;
 }
+
+/* The RSP keeps its own copy of the two othermode words in DMEM: G_SETOTHERMODE_H / _L change bits of that copy and
+ * send the whole result to the RDP (a G_RDPSETOTHERMODE). Loading a microcode (every task start, G_LOAD_UCODE)
+ * reloads DMEM from the ucode's data segment, which holds the copy ready made at offset 0xC8: in Snap's F3DEX2_NoN
+ * and L3DEX2 data both are EF080CFF 00000000 (H: G_TP_PERSP | G_TC_FILT | ..., L: 0 = G_ZS_PIXEL, no alpha compare).
+ * R1: without this reset the depth source of the last task (the UI's gDPSetDepthSource(G_ZS_PRIM)) leaked into the
+ * next frame, whose render modes only set the upper 29 bits: every world triangle was drawn with the primitive depth
+ * (one constant), so far scenery covered nearer scenery (the intro's fogged bush strip over the hill: the "mist" with
+ * hard edges). */
+static uint32_t rsp_om_h = 0x00080CFFu, rsp_om_l;
+void rdp_ucode_data(const unsigned char *data) {
+    uint32_t h = 0xEF080CFFu, l = 0;
+    if (data && in_memory(data + 0xC8, 8) && (vbe_ld32(data + 0xC8) >> 24) == 0xEF) {
+        h = vbe_ld32(data + 0xC8);
+        l = vbe_ld32(data + 0xCC);
+    } else if (data) gfx_log_once(0xC8000000, "ucode data %p: no othermode at 0xC8, defaults used", (const void *)data);
+    rsp_om_h = h & 0x00FFFFFFu;
+    rsp_om_l = l;
+}
 void rdp_end_task(void) {
     rdp_end_task_gl();
     rb_point(1);
@@ -1416,7 +1435,10 @@ void rdp_cmd(uint32_t w0, uint32_t w1, const uint32_t *next) {
     case 0xE2: case 0xE3: {   /* G_SETOTHERMODE_L / _H: 32 - shift - len, len - 1 */
         unsigned len = (w0 & 0xFF) + 1, sft = 32 - ((w0 >> 8) & 0xFF) - len;
         uint32_t mask = (len >= 32 ? 0xFFFFFFFFu : ((1u << len) - 1)) << sft;
-        if (op == 0xE2) om_l = (om_l & ~mask) | (w1 & mask); else om_h = (om_h & ~mask) | (w1 & mask);
+        /* merged into the RSP's copy, which the RDP then receives whole */
+        if (op == 0xE2) rsp_om_l = (rsp_om_l & ~mask) | (w1 & mask); else rsp_om_h = (rsp_om_h & ~mask) | (w1 & mask);
+        om_h = (om_h & 0xFF000000u) | (rsp_om_h & 0x00FFFFFFu);
+        om_l = rsp_om_l;
         state_dirty = 1;
         break;
     }
@@ -1437,7 +1459,11 @@ void rdp_cmd(uint32_t w0, uint32_t w1, const uint32_t *next) {
         state_dirty = 1;
         break;
     case 0xEE: prim_depth = w1; state_dirty = 1; break;
-    case 0xEF: om_h = (om_h & 0xFF000000u) | (w0 & 0x00FFFFFFu); om_l = w1; state_dirty = 1; break;
+    case 0xEF:   /* G_RDPSETOTHERMODE: both words, the RSP's copy too */
+        om_h = (om_h & 0xFF000000u) | (w0 & 0x00FFFFFFu); om_l = w1;
+        rsp_om_h = w0 & 0x00FFFFFFu; rsp_om_l = w1;
+        state_dirty = 1;
+        break;
     case 0xF0: load_tlut(w0, w1); state_dirty = 1; break;
     case 0xF2: {
         Tile *t = &tiles[(w1 >> 24) & 7];

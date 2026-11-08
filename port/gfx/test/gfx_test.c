@@ -385,6 +385,9 @@ unsigned char *gfx_test_run(void) {
     build_frame(&g);
     build_detector(&g);
     build_small(&g);
+    gDPPipeSync(g++);
+    gDPSetDepthSource(g++, G_ZS_PRIM);   /* like the UI at the end of Snap's frames (R1) */
+    gDPSetPrimDepth(g++, 0, 0);
     gDPFullSync(g++);
     gSPEndDisplayList(g++);
     memset(task, 0, sizeof task);
@@ -563,6 +566,35 @@ unsigned char *gfx_test_run2(void) {
     vset(ev, 0, 100, 0, 0, 0, 0, 0xFFFFFFFF); vset(ev, 1, 70, -20, 1, 0, 0, 0x000000FF); vset(ev, 2, 70, 20, 1, 0, 0, 0x000000FF);
     gSPVertex(g++, ev, 3, 0);
     gSP1Triangle(g++, 0, 1, 2, 0);
+    /* R1 (othermode per task): task 1 ended with gDPSetDepthSource(G_ZS_PRIM); this task only sets render modes (the
+     * upper 29 bits of othermode L), so the depth source is the microcode's default again (pixel): the far red
+     * triangle drawn after the near green one stays hidden */
+    gDPPipeSync(g++);
+    gDPSetColorImage(g++, G_IM_FMT_RGBA, G_IM_SIZ_16b, 320, K0(Z_PHYS));
+    gDPSetCycleType(g++, G_CYC_FILL);
+    gDPSetRenderMode(g++, G_RM_NOOP, G_RM_NOOP2);
+    gDPSetFillColor(g++, GPACK_ZDZ(G_MAXFBZ, 0) << 16 | GPACK_ZDZ(G_MAXFBZ, 0));
+    gDPFillRectangle(g++, 0, 0, 319, 239);
+    gDPPipeSync(g++);
+    gDPSetColorImage(g++, G_IM_FMT_RGBA, G_IM_SIZ_16b, 320, K0(FB2_PHYS));
+    gDPSetDepthImage(g++, K0(Z_PHYS));
+    gDPSetCycleType(g++, G_CYC_1CYCLE);
+    gDPSetRenderMode(g++, G_RM_ZB_OPA_SURF, G_RM_ZB_OPA_SURF2);
+    gDPSetCombineMode(g++, G_CC_SHADE, G_CC_SHADE);
+    gSPSetGeometryMode(g++, G_ZBUFFER | G_SHADE | G_SHADING_SMOOTH);
+    ortho(m);
+    gSPMatrix(g++, mtx(m), G_MTX_PROJECTION | G_MTX_LOAD | G_MTX_NOPUSH);
+    ident(m);
+    gSPMatrix(g++, mtx(m), G_MTX_MODELVIEW | G_MTX_LOAD | G_MTX_NOPUSH);
+    uint32_t *zv = vtx(6);
+    vset(zv, 0, 240, 200, -100, 0, 0, 0x00FF00FF); vset(zv, 1, 240, 236, -100, 0, 0, 0x00FF00FF); vset(zv, 2, 300, 236, -100, 0, 0, 0x00FF00FF);
+    vset(zv, 3, 240, 200, 100, 0, 0, 0xFF0000FF); vset(zv, 4, 240, 236, 100, 0, 0, 0xFF0000FF); vset(zv, 5, 300, 236, 100, 0, 0, 0xFF0000FF);
+    gSPVertex(g++, zv, 6, 0);
+    gSP1Triangle(g++, 0, 1, 2, 0);
+    gSP1Triangle(g++, 3, 4, 5, 0);
+    gSPClearGeometryMode(g++, G_ZBUFFER);
+    gDPPipeSync(g++);
+    gDPSetRenderMode(g++, G_RM_OPA_SURF, G_RM_OPA_SURF2);
     /* branch: a called list branches to another, whose end returns to this one */
     {
         Gfx *b = branch2;
@@ -610,6 +642,8 @@ unsigned char *gfx_test_run2(void) {
         check("eye_plane_vertex", g1 >= 1 && g1 <= 5 && g2 >= 11 && g2 <= 15 && e3 == rgba16(40, 40, 40, 1),
               "x 240: %04X (green %d, 3 expected), x 300: %04X (green %d, 13 expected), above the strip %04X", e1, g1, e2, g2, e3);
     }
+    p = fb_px(FB2_PHYS, 320, 250, 230);
+    check("othermode_per_task", p == rgba16(0, 255, 0, 1), "%04X (the near green triangle; red = depth source leaked from task 1)", p);
     uint16_t y = fb_px(FB2_PHYS, 320, 255, 155), cy = fb_px(FB2_PHYS, 320, 285, 155), bg = fb_px(FB2_PHYS, 320, 5, 230);
     check("branch_list", y == rgba16(255, 255, 0, 1) && cy == rgba16(0, 255, 255, 1) && bg == rgba16(40, 40, 40, 1), "%04X %04X %04X", y, cy, bg);
     port_gfx_vi_frame(rd(FB2_PHYS), 320);

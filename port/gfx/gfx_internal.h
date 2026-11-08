@@ -70,6 +70,7 @@ extern int gfx_tex_on, gfx_tex_tile, gfx_tex_level;
 
 /* ------------------------------------------------------------------ RDP side (gfx_rdp.c) */
 void rdp_reset_task(void);
+void rdp_ucode_data(const unsigned char *data);   /* a microcode's data segment was loaded into DMEM (task start, G_LOAD_UCODE) */
 void rdp_cmd(uint32_t w0, uint32_t w1, const uint32_t *next); /* an RDP command (0xE4..0xFF etc.); next = following words */
 void rdp_tri(const GfxVtx *a, const GfxVtx *b, const GfxVtx *c);
 void rdp_line(const GfxVtx *a, const GfxVtx *b, float width);

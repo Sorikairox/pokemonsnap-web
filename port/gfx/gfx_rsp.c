@@ -403,6 +403,7 @@ static void run_dl(uint32_t start) {
         case 0xDD:   /* G_LOAD_UCODE: w1 = text, rdphalf1 = data */
             port_gfx_stats.ucode_loads++;
             ucode_l3dex2 = is_l3dex2(w1);
+            rdp_ucode_data(rdphalf1 ? gfx_addr(rdphalf1) : 0);
             break;
         case 0xDE: {
             const uint32_t *t = (const uint32_t *)gfx_addr(w1);
@@ -452,6 +453,7 @@ void port_gfx_run_dl(const void *dl, int l3dex2) {
     port_gfx_init();
     rsp_reset();
     rdp_reset_task();
+    rdp_ucode_data(0);
     ucode_l3dex2 = l3dex2;
     run_dl((uint32_t)(uintptr_t)dl);
     rdp_end_task();
@@ -466,6 +468,7 @@ void port_gfx_task(void *task) {
     if (type == 1) {   /* M_GFXTASK */
         rsp_reset();
         rdp_reset_task();
+        { uint32_t ud = vbe_ld32(t + 6); rdp_ucode_data(ud ? gfx_addr(ud) : 0); }   /* OSTask.ucode_data (0x18) */
         heap_top = (uint32_t)emscripten_get_heap_size();
         ucode_l3dex2 = is_l3dex2(ucode);
         run_dl(data);
