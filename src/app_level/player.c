@@ -213,6 +213,12 @@ void updateCameraZoomedIn(GObj*);
 void updatePauseMenu(GObj*);
 void func_80357120_4F7530(GObj*);
 void screenCoorsToWorld(f32*, f32*, f32*);
+#ifdef PORT
+/* port (F1, port/ultra/pc_options.c): the Snap button learns, every game frame, that the player controls the camera
+ * and how far the zoom is (gDirectionIndex: -1 zoomed in, -2 zooming, >= 0 zoomed out) */
+void port_snap_course(s32 direction, s32 zoomSwitch, s32 ready);
+#define PORT_SNAP_COURSE(ready) port_snap_course(gDirectionIndex, ZoomSwitchMode, (ready) && !IsPaused)
+#endif
 void BumpDetector_Init(void);
 void func_8035E37C_4FE78C(void);
 GObj* Msg_InitCamera(void);
@@ -505,6 +511,9 @@ void handleAnalogStick(GObj* obj) {
             ohPauseProcessByFunction(obj, updateCameraZoomedOut);
         }
     }
+#ifdef PORT
+    PORT_SNAP_COURSE(D_80382D04_523114 == 1 && !IsInputDisabled);
+#endif
 }
 
 void func_80351114_4F1524(GObj* obj) {
@@ -1280,6 +1289,9 @@ void updateCameraZoomedIn(GObj* obj) {
 
     static s32 sTimerAfterPhotoTaken = -1;
 
+#ifdef PORT
+    PORT_SNAP_COURSE(true);
+#endif
     if (D_80382D08_523118 == 0) {
         if (TargetDirectionZoomedIn == 1) {
             PlayerViewYaw += 0.1f;
@@ -1998,6 +2010,9 @@ void func_803552B0_4F56C0(GObj* obj) {
             Tutorial_ShowMessage(MESSAGE_PRESS_Z);
         }
 
+#ifdef PORT
+        PORT_SNAP_COURSE(D_80382D04_523114 == 1); /* the tutorial's "Press Z" wait: handleAnalogStick is paused */
+#endif
         ohWait(1);
     }
 

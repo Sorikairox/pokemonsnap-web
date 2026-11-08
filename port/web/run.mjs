@@ -5,6 +5,8 @@
 //        [--audio] [--play]   (S7: OUT/audio.wav, the PCM the host drained; --play plays it in the page, headless
 //        Chrome stays muted)
 //        [--save FILE]   (S8: boot with that FlashRAM image; the game's writes are dumped to OUT/flash.fla)
+//        [--option ID=VALUE ...]   (F1: port options, port/ultra/pc_options.c; e.g. --option 1=0 turns the Snap button
+//        off. Input masks may use bit 16 (0x10000), the Snap button)
 // Serves port/web/{index.html,worker.js}, port/build/web/pokemonsnap.{js,wasm} and the player's ROM (/rom, read from
 // --rom: never copied, never served from the repo) on 127.0.0.1, starts Chrome headless (muted, SwiftShader, its own
 // temporary profile) and drives it over the DevTools protocol (the port/gfx/test/cdp.mjs method: node's own WebSocket,
@@ -38,6 +40,8 @@ const logops = (opt('logops', '') || '').split(',').filter(Boolean).map(Number);
 const cfg = { frames, shots: [...shots].sort((a, b) => a - b), tap, input, logops, pace: opt('pace', 'fast'), args: [],
   readback: !args.includes('--no-readback'), tapEnd: +opt('tap-end', 0),
   audio: args.includes('--audio'), play: args.includes('--play') };
+// F1: --option ID=VALUE (repeatable): a port option set before main, as the retrowser host's rtw_option does
+cfg.options = args.flatMap((a, i) => (a === '--option' && args[i + 1] ? [args[i + 1].split('=').map(Number)] : []));
 const saveIn = opt('save', null) ? resolve(opt('save')) : null;
 if (saveIn && !existsSync(saveIn)) { console.error(`no save image at ${saveIn}`); process.exit(2); }
 cfg.save = !!saveIn;
