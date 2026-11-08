@@ -58,6 +58,7 @@ typedef struct {
     unsigned char *zkey;      /* Z image used with this target */
     unsigned zgen;
     unsigned last_use;
+    int shown;                /* presented by the VI at least once: a framebuffer */
 } Target;
 static Target targets[MAX_TARGETS];
 static Target *cur_target;
@@ -881,11 +882,12 @@ void rdp_reset_task(void) {
 void rdp_end_task(void) {
     if (gl_ok != 1) return;
     flush();
-    /* small (non-screen) colour images are written back at the end of every task: the game reads them with the
-     * CPU (detector regions) or copies them (score thumbnails) without always invalidating first */
+    /* colour images that are not framebuffers (never shown by the VI) are written back at the end of every task:
+     * the game reads them with the CPU or copies them without invalidating first (detector regions, score images,
+     * and the 320x210 photo renders of window/847B60.c that the CPU averages into album / camera-check sprites) */
     for (int i = 0; i < MAX_TARGETS; i++) {
         Target *t = &targets[i];
-        if (t->addr && t->width != 320 && t->width != 640) target_resolve(t, 0, t->height);
+        if (t->addr && !t->shown) target_resolve(t, 0, t->height);
     }
 }
 
@@ -972,6 +974,7 @@ void port_gfx_vi_frame(const void *fb, int width) {
     if (width <= 0) width = 320;
     Target *t = target_get(p, width, SIZ_16b, width == 640 ? 480 : 240);
     if (t->dirty_y1 <= t->dirty_y0) target_sync_cpu(t);   /* clean: RDRAM is authoritative (CPU-drawn frames) */
+    t->shown = 1;
     int cw = 0, ch = 0;
     emscripten_webgl_get_drawing_buffer_size(gl_ctx, &cw, &ch);
     glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
