@@ -2,6 +2,60 @@
 
 Newest session first. Read `docs/port/PLAN.md` (goal, survey, approach, phases, rules) before working.
 
+## S9 — 2026-11-09: the retrowser module (worker build, template + fill, local host e2e)
+
+Design and commands: **docs/port/RTW.md**. Commits: fd4ca02 (S7 + S8 + R1 handoff), 780ef80 (module target),
+f9f865e (template + fill, build / scans), 5c14de9 (e2e, node host), and this docs commit.
+
+1. **Module** (`port/rtw/rtw.c`, `rtw_glue.js`, `library_rtw.js`, `port_build.py --rtw`): worker-only Emscripten
+   build of the same objects; exports `rtw_rom_buffer/start/input/pause/resize/save_load` + S7 audio + S8 save;
+   imports `rtw_log`, `rtw_build_id`, `rtw_rumble`. Self-running, input-clocked: the host's port-0 `rtw_input`
+   starts a due retrace in a microtask, one catch-up timer at most (traps 13/14). ROM SHA-1 checked, wrong ROM ->
+   plain error. Stored save copied by the host straight into the flash array before `main`. Rumble: wired
+   (`port_rumble`) but never reached: the game never starts the motor (only init + stop at reset) and no pak is
+   reported. `rtw_export_file` not used (album PNG export would be a feature).
+2. **ROM-freedom**: `rtw.mjs check --rom` first FAILED with the `.n64` (2 x 4 KiB of `sTanTable`); a finer scan found
+   24 KB of decomp C data in runs >= 64 bytes (tables, paths, dialogue). The shipped wasm is now a template:
+   `romfill.py` zeroes 345 runs / 57,575 bytes and writes `pokemonsnap.romfill` (offsets only), `rtw.c` fills them from
+   the player's ROM before `main` (hash checked). **Trap**: vbe's `__vbe_fix` constructors run at instantiation,
+   before the fill: the first template showed word-reversed text; they are now queued in this target and run after
+   the fill (`port_vbe_fix_defer`). `port_task_log` turns the per-task census / `[task]` lines off here (they flooded
+   the host log).
+3. **Manifest** `port/rtw/retrowser.json`: id `pokemonsnap-us`, n64, rom.sha1 edc7c49c…, webgl, hz 60, flash 131072,
+   files.data `pokemonsnap.romfill`; no licence / source / picture / icon (publishing not decided).
+
+Verified (all re-run at the end; screenshots looked at, all in `port_work/s9/`, never committed):
+- `port/rtw/build.sh`: `rtw.mjs check` OK with `--rom pokemonsnap.z64` and with `--rom "Pokemon Snap (USA).n64"`
+  (build id 91d4a492…); `romscan.py` 0 runs >= 64 bytes in all four files (5 x 32-byte windows at 32: coincidences).
+- `node port/rtw/e2e.mjs` (local host: retrowser `dist/` via serve-worker + GitHub mock, headless muted Chrome):
+  **e2e: PASS** (desk, touch, wrong, offline). Pictures: `e2e_d/02-title-input.png` name card with correct text,
+  `06-save-ask.png` "Shall I save your progress?", `07-saved.png` "Would you like to keep going?" (+ the host's
+  storage toast), `08-reload-continue.png` "I have been waiting for you, AAAAAAA."; `e2e_e/00-touch-portrait.png`,
+  `02/03-touch-landscape*.png` HAL intro with the host's N64 pad (stick, L/Z/R, C, B, A, Start) beside / under the
+  picture, A highlighted when touched; `04-wrong-rom.png` the host's error box (our message under "Details");
+  `05-offline.png` intro after the offline reload. Stored save `e2e/stored.fla`: 131072 bytes, version + MD4 OK.
+  Pacing: 59.6-60.1 retraces/s on 56-59 display frames/s; 1.5-9.8 timer wake-ups/s, each one a catch-up retrace.
+- Equivalence: `node_host.mjs` 3000 retraces on the template vs the unstripped link: tasks.txt identical; vs
+  `port-test` (harness): task sequence / command counts and PCM hashes identical.
+- Harness unchanged in behaviour: full S8 route with `--audio` (`port_work/s9/route_a`, 18300 retraces): all 7 PNGs,
+  `audio.wav`, `flash.fla` and every `[task]` line byte-identical to the orchestrator's `merge_all` run (d15b58f);
+  f15600 Pidgey Total 2810; save at 17961, generation 1006, `snap_save.py` version + MD4 OK.
+- `port/gfx/test/run.sh` CHECKS + CHECKS2 ALL OK; node `port-test --frames 5000` OK, 0 stubs; matching build
+  `build/pokemonsnap.z64: OK`.
+
+### Remaining / next
+
+1. Not tested: a real phone (WebKit worker, real dpr: headless emulation reported dpr 1 in the sandbox), a gamepad,
+   loading the exported `.fla` in an emulator, a 30 Hz / 120 Hz display.
+2. The first touch on a fresh phone page was once not seen as a press (1 of 5 runs; the test now retries up to 3
+   taps): probably host-side, check on a device.
+3. Wrong-ROM message is only under the host's "Details" (host UI choice).
+4. Publishing needs: a licence (upstream has none), a public repo the user chooses, the user's approval; then
+   `license` / `source` (and optional picture / icon) in the manifest and the dist files committed (RTW.md).
+5. Next: S10 (all courses), album route (Album Mark), `rtw_export_file` for photos behind an option.
+
+Downloads: none (retrowser's local checkout provided rtw.mjs, the host, the mock and playwright-core).
+
 ## S7 + S8 + R1 — 2026-11-09: audio, FlashRAM save, renderer fixes (parallel worktrees, merged)
 
 Three sessions ran in parallel worktrees from `web` 834301c and were merged (e9471c3: S8 with S7, harness and build
