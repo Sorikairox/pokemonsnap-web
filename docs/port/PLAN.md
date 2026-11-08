@@ -15,8 +15,8 @@ skill).
   100 %), data 84 % mapped (decomp.dev). Matching build: splat + IDO 5.3/7.1 recomp + ninja -> `pokemonsnap.z64`.
 - ROM: **US**, `pokemonsnap.z64`, SHA-1 `edc7c49cc568c045fe48be0d18011c30f393cbaf`, 16 MiB, NTSC (60 Hz VI).
   The user owns it (S1: `Pokemon Snap (USA).n64` at the repo root, gitignored). Never commit it or anything from it.
-- **No licence file upstream.** retrowser shows a licence and the port must be public to load from a link. User's
-  answer (section 7): develop privately, no publishing for now.
+- **No licence file upstream.** retrowser shows a licence and the port must be public to load from a link. Since
+  S9 the port repo is **public** under MIT: github.com/Sorikairox/pokemonsnap-web (section 7).
 - No PC or web port exists. Other Snap projects do not fit: andrewnakas/pokemonsnap-cleanroom runs a rebuilt ROM in
   an N64 emulator; Snap64Recomp / sp00nznet are static recompilations for desktop renderers.
 
@@ -136,7 +136,8 @@ Determinism modes and route tests (WPO §5) are added at S4 and grow with each p
 - **Never commit ROM-derived bytes** (assets, extracted files, screenshots, captures, saves). Generated asset dirs
   (`assets/`, `build/`, `asm/`) are already gitignored upstream; port work output goes to a gitignored `port_work/`.
 - Never modify or copy the ROM into the repo; read it from its own path.
-- **Never push upstream** (ethteck/pokemonsnap). Back up to a private remote of the user's only when they create one.
+- **Never push upstream** (`origin` = ethteck/pokemonsnap). Pushes go only to `pub` (Sorikairox/pokemonsnap-web) and
+  only by the orchestrator: session agents commit on `web` and never push (section 7).
 - No system installs or downloads without the user's approval (IDO recomp download by `configure.py --setup`,
   Docker images, npm/pip packages: ask first). No git stash.
 - Never pkill/pgrep; kill only PIDs you started. Headless Chrome muted; timing-sensitive runs alone.
@@ -161,11 +162,17 @@ Determinism modes and route tests (WPO §5) are added at S4 and grow with each p
 
 Answered by the user at S1 (2026-11-08):
 
-1. **Licence**: develop privately, no publishing (revisit before S9 / any retrowser link: needs a licence upstream).
+1. **Licence / publishing** (changed after S9, 2026-11-09): the repo is **public** at
+   github.com/Sorikairox/pokemonsnap-web, **MIT** licence for the whole repo (`LICENSE`), manifest `license` + `source`
+   set. retrowser deploys / Cloudflare changes still need the user's explicit approval each time.
 2. **ROM**: the user's ROM is `Pokemon Snap (USA).n64` at the repo root (byte-swapped .n64; gitignored by `*.n64`;
    never modify, move or commit it). The build's big-endian baserom `pokemonsnap.z64` (gitignored by `*.z64`) is
    written from it by `port/docker/run.sh rom`.
-3. **Remote / branch**: a local branch **`web`** only; **no push ever** (no remote chosen). Commit code, tooling,
-   names/offsets tables and docs; never the ROM or anything built from it (check `git status` before each commit).
+3. **Remote / branch**: work on branch **`web`**. Remote **`pub`** = github.com/Sorikairox/pokemonsnap-web (default
+   branch `web`); the retrowser build lives on the orphan branch **`rtw-dist`** (dist files + manifest at its root).
+   **Only the orchestrator pushes, and only to `pub`**; session agents never push. **Never push to `origin`**
+   (ethteck/pokemonsnap). After any port change, `rtw-dist` must be rebuilt with `port/rtw/build.sh` (`rtw.mjs check
+   --rom` OK) before it is pushed. Commit code, tooling, names/offsets tables and docs; never the ROM or anything
+   built from it (check `git status` before each commit).
 4. **Toolchain**: downloads approved for S1; everything runs in Docker (Docker Desktop CLI at
    `/Applications/Docker.app/Contents/Resources/bin/docker`; `/usr/local/bin/docker` is a dead OrbStack link).

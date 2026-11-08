@@ -5,11 +5,12 @@ repository, checks every file by SHA-256 and runs it in a dedicated Web Worker i
 player's ROM. This is a **separate build target** of the port: the harness build (`port/build/web`, node
 `port-test`, `port/web/run.mjs`) is unchanged and links the same objects.
 
-**Not published.** The upstream decomp has no licence and the user decided to develop privately: no push, no
-deploy, no retrowser link. What publishing would need: a licence for the port's code (upstream has none: ask
-ethteck/pokemonsnap or keep it private), a public GitHub repository chosen by the user, the user's approval, then
-commit `port/build/rtw/dist/*` (e.g. an `rtw-dist` branch, manifest at its root) and add `license` / `source` (and,
-if wanted, `picture` / `icon` the project has the right to use) to the manifest.
+**Published** (since 2026-11-09): public repo github.com/Sorikairox/pokemonsnap-web (remote `pub`, default branch
+`web`), MIT licence for the whole repo, manifest `license: MIT` + `source`. The retrowser build is the orphan branch
+**`rtw-dist`** (`port/build/rtw/dist/*`, manifest at its root). After any port change it must be rebuilt with
+`port/rtw/build.sh` (`rtw.mjs check --rom` OK) before it is pushed; only the orchestrator pushes, only to `pub`, never
+to `origin` (ethteck). retrowser deploys need the user's approval each time. Optional `picture` / `icon` (something
+the project has the right to use) are not set.
 
 ```sh
 port/rtw/build.sh            # docker port build --rtw, template + fill, manifest, hash, check --rom (z64 + .n64), romscan
@@ -41,7 +42,8 @@ Needs `./pokemonsnap.z64` (`port/docker/run.sh rom PATH`) and the local retrowse
 | `video` | `webgl` | WebGL2 on the host's OffscreenCanvas (`Module.canvas`, port/gfx/gfx_gl.js) |
 | `hz` | 60 | NTSC; informative (self-running) |
 | `save` | `flash`, 131072 | the cartridge's FlashRAM, console byte order (SAVE.md) |
-| no `options`, `controls.extra`, `net`, `license`, `source`, `picture`, `icon` | | nothing needs them yet; licence / source / pictures wait for the publishing decision |
+| `license`, `source` | `MIT`, github.com/Sorikairox/pokemonsnap-web | public repo |
+| no `options`, `controls.extra`, `net`, `picture`, `icon` | | nothing needs them yet |
 
 ## Build (`port_build.py --rtw`, `link_rtw`)
 

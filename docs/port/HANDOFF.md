@@ -2,6 +2,11 @@
 
 Newest session first. Read `docs/port/PLAN.md` (goal, survey, approach, phases, rules) before working.
 
+**Status since 2026-11-09 (after S9):** the repo is **public** (github.com/Sorikairox/pokemonsnap-web, remote `pub`,
+default branch `web`; retrowser build on the orphan branch `rtw-dist`; MIT licence for the whole repo). Only the
+orchestrator pushes, only to `pub`; never to `origin` (ethteck). Rebuild `rtw-dist` with `port/rtw/build.sh` (check
+`--rom` OK) after port changes. Older entries saying "private" / "never push" describe the state at their time.
+
 ## S9 — 2026-11-09: the retrowser module (worker build, template + fill, local host e2e)
 
 Design and commands: **docs/port/RTW.md**. Commits: fd4ca02 (S7 + S8 + R1 handoff), 780ef80 (module target),
