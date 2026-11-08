@@ -35,3 +35,6 @@ port_work/
 *.n64
 *.z64
 *.v64
+
+# wasm port build output (port/tools/port_build.py)
+port/build/

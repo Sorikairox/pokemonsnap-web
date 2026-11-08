@@ -554,7 +554,12 @@ POKEMON_FUNC(charmeleon_EvolvedMoveRun)
 }
 
 POKEMON_FUNC(charmeleon_EvolvedHitByPesterBall)
+#ifdef PORT
+    InteractionHandler saved[3]; // port: clang has no array-from-array initialiser (IDO copies)
+    PORT_ARRAY_INIT(saved, charmeleon_tg_evolved_Hit);
+#else
     InteractionHandler saved[3] = charmeleon_tg_evolved_Hit;
+#endif
 
     Pokemon_SetAnimation(obj, &charmeleon_animation_fall);
     Pokemon_StartPathProc(obj, NULL);
@@ -606,7 +611,12 @@ POKEMON_FUNC(charmeleon_EvolvedRunToApple)
 }
 
 POKEMON_FUNC(charmeleon_EvolvedWithApple)
+#ifdef PORT
+    InteractionHandler saved[5]; // port: clang has no array-from-array initialiser (IDO copies)
+    PORT_ARRAY_INIT(saved, charmeleon_tg_evolved_WithApple);
+#else
     InteractionHandler saved[5] = charmeleon_tg_evolved_WithApple;
+#endif
 
     Pokemon_ForceAnimation(obj, &charmeleon_animation_roar);
     Pokemon_StartPathProc(obj, charmeleon_EvolvedTurnToApple);

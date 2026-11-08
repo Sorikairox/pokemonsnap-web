@@ -1,0 +1,10 @@
+# Port (wasm32) toolchain: the local emscripten/emsdk:4.0.15-arm64 image with its system libraries prebuilt, so
+# that `docker run --rm` links do not rebuild libc / compiler-rt every time. No package download: emsdk builds its
+# sysroot from the sources it ships. Built by port/docker/run.sh port-image.
+FROM emscripten/emsdk:4.0.15-arm64
+RUN printf 'int main(void){return 0;}\n' > /tmp/w.c \
+ && emcc -O1 /tmp/w.c -o /tmp/w.js -sASYNCIFY -sMODULARIZE=1 -sENVIRONMENT=worker,node \
+ && emcc -O1 /tmp/w.c -o /tmp/w2.js \
+ && rm -f /tmp/w.* /tmp/w2.* \
+ && chmod -R a+rwX /emsdk/upstream/emscripten/cache
+WORKDIR /src

@@ -487,7 +487,11 @@ s32 UIText_Ascii2WideChar(s32 c) {
     return c;
 }
 
+#ifdef PORT /* port: window.h declares u8* (IDO accepts the mismatch; char is unsigned in both builds) */
+void UIText_PrintString(UIText* text, s32* x, s32* y, u8* str) {
+#else
 void UIText_PrintString(UIText* text, s32* x, s32* y, char* str) {
+#endif
     s32 printedChar;
     u8* ptr = str;
     s32 i;

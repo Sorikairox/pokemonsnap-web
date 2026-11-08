@@ -118,7 +118,7 @@ per frame while aiming.
 | Phase | Goal | Done when |
 |---|---|---|
 | **S1 Toolchain + matching build** | Docker images (emsdk; the decomp's Python + IDO recomp run where upstream expects); upstream build reproduces the ROM (checksum OK) with the user's ROM | `ninja` OK; `port/symbols/*.tsv` generated from the map (offsets/names only); ROM-free audit of what the port must not compile (the 372 asset-including TUs listed) |
-| **S2 Port build skeleton** | wasm32 build of all game TUs (code only), stubs for unported libultra calls (logged once), mirror + ROM loader, vbe pass, signature pass | the module links; census of TUs (none silently dropped); stubs list |
+| **S2 Port build skeleton** | wasm32 build of all game TUs (code only), stubs for unported libultra calls (logged once), mirror + ROM loader, vbe pass, signature pass | the module links; census of TUs (none silently dropped); stubs list (done S2: docs/port/MEMORY.md; indirect calls and bitfields moved to S3) |
 | **S3 First frame** | fibers + VI, DMA, dmaLoadOverlay, minimal F3DEX2 on WebGL2 in a local test page | the N64/HAL logos or first screen visible (screenshot looked at, not assumed) |
 | **S4 Title and menus** | controller input, more GBI, sprites/S2DEX, YUV, text | title -> main menu -> Professor Oak's lab by real input |
 | **S5 First level** | Beach: object threads, models, animation, on-rails camera | play the Beach course start to end |

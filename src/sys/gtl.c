@@ -428,7 +428,11 @@ void gtlLoadUcode(Gfx** dlist, u32 ucodeIdx) {
         case 0:
         case 1:
         case 2:
+#ifdef PORT /* port: clang rejects gbi.h's &##ucode##TextStart paste */
+            gSPLoadUcode((*dlist)++, OS_K0_TO_PHYSICAL(&gspF3DEX2_NoN_fifoTextStart), OS_K0_TO_PHYSICAL(&gspF3DEX2_NoN_fifoDataStart));
+#else
             gSPLoadUcodeL((*dlist)++, gspF3DEX2_NoN_fifo);
+#endif
             break;
         case 3:
         case 4:
@@ -436,7 +440,11 @@ void gtlLoadUcode(Gfx** dlist, u32 ucodeIdx) {
         case 6:
         case 7:
         case 8:
+#ifdef PORT /* port: clang rejects gbi.h's &##ucode##TextStart paste */
+            gSPLoadUcode((*dlist)++, OS_K0_TO_PHYSICAL(&gspL3DEX2_fifoTextStart), OS_K0_TO_PHYSICAL(&gspL3DEX2_fifoDataStart));
+#else
             gSPLoadUcodeL((*dlist)++, gspL3DEX2_fifo);
+#endif
             break;
         case 9:
             break;

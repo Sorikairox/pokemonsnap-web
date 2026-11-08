@@ -2,6 +2,57 @@
 
 Newest session first. Read `docs/port/PLAN.md` (goal, survey, approach, phases, rules) before working.
 
+## S2 — 2026-11-08: port build skeleton (all game C to wasm32, mirror + ROM loader + relocations, vbe, sigs, link)
+
+- **Image `pokemonsnap-emsdk`** (`port/docker/Dockerfile.emsdk`): the local `emscripten/emsdk:4.0.15-arm64` with its
+  sysroot libraries prebuilt by two test links. No download. `port/docker/run.sh port-image | port | port-test
+  [--load-all] | port-sh`; `run.sh relocs` (toolchain image) writes `port/symbols/relocs.tsv`.
+- **`port/tools/port_build.py`** (census -> C->IR -> sigs -> vbe -> -O1 -> PC layer -> stubs -> link), ~10 s clean,
+  incremental, deterministic (two clean builds gave the same wasm SHA-1; final build `309d4069…`). Details: **docs/port/MEMORY.md**.
+- **Census** `port/census.tsv`: all 996 objects of the matching link, 0 unlinked `src/*.c`. Compiled through vbe and
+  OK: 242 game + 14 game-data + 1 mixed (`52DE0.c`, asset includes under `#ifdef PORT`) + 76 libultra C
+  (gu/libc/audio/sp/vimodes) = **333 TUs, 0 failures** (4105 functions). Not compiled, each with its reason: 371 asset
+  TUs + 39 asm/data + 138 bin (ROM -> mirror), 87 libultra os/io/debug C + 22 libultra asm + `src/os/osFlash.c` +
+  `entry.s` (PC layer), 4 `src/rsp/*.s` (HLE).
+- **Link OK**: `port/build/web/pokemonsnap.{js,wasm}` (2.29 MB wasm), 0 link warnings, undefined symbols are errors.
+  **Stubs list** `port/stubs.tsv`: 63 logged function stubs (all libultra os/io/flash/cont/gbpak: threads, messages,
+  VI, SP, AI, PI, cont, flash), 2176 + 3 mirror labels the link needed, 5 libc names used by the PC layer only.
+  No game function is stubbed.
+- **Mirror + ROM loader** (`port/ultra/pc_mem.c`): `n64_rdram` 8 MiB at wasm 0x10800000 with 15663 labels;
+  `port_set_rom` (z64/n64/v64 -> vbe layout), `port_rom_copy`, `port_load_segment` (copy + bss clear + relocations).
+  **Relocations** frozen from the matching objects (33785 pointer words of the ROM-loaded data, names/offsets only)
+  and resolved at link time (C objects 209, functions 501 by name = right overlay, mirror 32495, absolute 564).
+- **Game C edits** (all `#ifdef PORT`, matching build unchanged): `52DE0.c` (asset includes -> externs), 8 local
+  array-from-array initialisers (`5612B0.c`, charmander, charmeleon, gate: `PORT_ARRAY_INIT`), `gtl.c`
+  (`gSPLoadUcodeL` token paste), `text.c` (`UIText_PrintString` u8* like window.h). The one `func_` touched is
+  renamed: `beach_5612B0_WaitForInteraction` /* was func_beach_802C93B8 */ (also in `tools/symbol_addrs.txt`, since
+  splat's asm data refers to it; `symbols.tsv` / `relocs.tsv` regenerated: only that name changed).
+- Port fixes to the Conker tools: EUC-JP compile of non-ASCII TUs (Japanese character constants), `-funsigned-char`,
+  64-bit `va_arg` loads kept native, sigs.py `sret`/`byval` definition parsing, byval kept on rewritten sites, static
+  functions never rewritten, libc-clash check (found acosf/asinf/atan2f/atanf/tanf).
+- **Tests run**: `port/docker/run.sh port` (link OK); `port-test` in node with `./pokemonsnap.z64`: ROM title read
+  through the vbe layout, main segment loaded, **vbe self-test: the game's own sprintf gives
+  "snap -42 beef zubat ! 3.25 -1234567890123" OK**, `game_main()` runs to 4 logged stubs (`__osSetWatchLo`,
+  `osInitialize`, `osCreateThread`, `osStartThread`) and returns; `port-test --load-all`: 119 segments, 0 bad
+  relocation words. Matching build after the edits: `build/pokemonsnap.z64: OK` (SHA-1 `edc7c49c…baf`).
+- **Trap found**: a second `configure.py` with a warm `.splache` writes an incomplete `undefined_syms_auto.txt`
+  (link: 3501 undefined `D_` symbols). `run.sh build` now runs `configure.py --clean` (~45 s).
+- Provenance: `port/tools/vbe.py` (generic pass) and `sigs.py` are adapted from the Conker web port (the user's own
+  repo Sorikairox/conker-eu-port, no licence file); everything else written here. The port compiles ultralib's
+  gu/libc/audio/sp/vimodes C (SGI copyright headers, no licence): fine for the private build, part of the licence
+  question before any publishing.
+
+### Next (S3: first frame)
+
+1. Threads: OSThread as ASYNCIFY fibers with fixed-address stacks, message queues, VI retrace at 60 Hz, `osSpTaskStart`
+   -> renderer / audio synchronously; replace the 63 stubs by the PC layer (`port_prefix.h` can `#pragma weak` them).
+2. PI DMA (`osEPiStartDma` -> `port_rom_copy`) and `dmaLoadOverlay` -> `port_load_segment` (relocations are ready;
+   decide how overlay C data / bss in wasm is re-initialised when an overlay is reloaded).
+3. Indirect calls: site-typed trampolines (Conker icall.py + pc_icall.c), plus the address -> function table for
+   pointers computed at run time; bitfields MSB-first (MEMORY.md "Known gaps"); `osVirtualToPhysical` must return
+   console physical addresses (audio).
+4. Minimal F3DEX2 on WebGL2 in a local test page; the first screen, looked at.
+
 ## S1 — 2026-11-08: toolchain image, matching build OK, frozen symbol tables
 
 - User answers (PLAN.md section 7): develop privately (no publishing); local branch `web` only, never push;

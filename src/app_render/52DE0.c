@@ -11,12 +11,22 @@ static OMCamera* D_800BE2C8;
 static bool D_800BE2CC;
 static GObj* D_800BE2D0;
 
+#ifdef PORT
+// port: the asset data stays in the ROM; these are labels in the RDRAM mirror (port/tools/gen_stubs.py)
+extern Vtx D_800AEC70[4];
+extern Gfx D_800AECB0[];
+extern Vtx D_800AECE0[32];
+extern Gfx D_800AEEE0[];
+extern Vtx D_800AEF80[10];
+extern Gfx D_800AF020[];
+#else
 #include "assets/app_render/D_800AEC70.vtx.inc.c"
 #include "assets/app_render/D_800AECB0.gfx.inc.c"
 #include "assets/app_render/D_800AECE0.vtx.inc.c"
 #include "assets/app_render/D_800AEEE0.gfx.inc.c"
 #include "assets/app_render/D_800AEF80.vtx.inc.c"
 #include "assets/app_render/D_800AF020.gfx.inc.c"
+#endif
 
 s32 D_800AF050 = 0;
 s32 D_800AF054 = 0; // r

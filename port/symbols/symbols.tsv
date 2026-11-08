@@ -10053,7 +10053,6 @@ UIElement_TransparentWhiteColor	8037EA7C	85222C	4	data	global	.window	window	bui
 __vsDelta	800314EC	320EC	24	func	global	.main	main	build/ultralib/src/audio/seqplayer.c.o
 kangaskhan_tex_8016D508	8016D508	-	0	data	global	abs	-	-
 D_801AB190_9709B0	801AB190	9709B0	FF8	data	global	.oaks_lab	oaks_lab	build/asm/data/oaks_lab/95B6C0.data.s.o
-func_beach_802C93B8	802C93B8	561428	84	func	global	.beach_code	beach_code	build/src/beach/5612B0.c.o
 grimer_part6_draw	8031A4D8	69C988	28	data	global	.cave_code	cave_code	build/src/cave/grimer/model.c.o
 D_800994E0	800994E0	-	0	none	global	abs	-	-
 D_800ACE7C	800ACE7C	5882C	24	data	global	.app_render	app_render	build/asm/data/app_render/47380.data.s.o
@@ -12702,6 +12701,7 @@ D_803A54F0_878CA0.NON_MATCHING	803A54F0	878CA0	1	data	global	.window	window	buil
 func_801DF078_9FCD38	801DF078	9FCD38	710	func	global	.gallery	gallery	build/src/gallery/9FAC10.c.o
 mew_part15_draw_near	8034E9D8	82E148	190	data	global	.rainbow_code	rainbow_code	build/src/rainbow/mew/model.c.o
 _binary_assets_squirtle_textures_bin_start	8017BA50	471E90	0	none	global	.valley_assets	valley_assets	build/assets/squirtle/textures.bin.o
+beach_5612B0_WaitForInteraction	802C93B8	561428	84	func	global	.beach_code	beach_code	build/src/beach/5612B0.c.o
 ditto_part7_draw_far	8032CC78	6AF128	110	data	global	.cave_code	cave_code	build/src/cave/ditto/model.c.o
 D_802F0218_5ED2E8	802F0218	-	0	data	global	abs	-	-
 meowth_part8_draw	80339630	5D16A0	28	data	global	.beach_code	beach_code	build/src/beach/meowth/model.c.o

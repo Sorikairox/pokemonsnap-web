@@ -454,8 +454,18 @@ POKEMON_FUNC(charmander_HowlingEnded)
 }
 
 POKEMON_FUNC(charmander_HitOrBurnt)
+#ifdef PORT
+    InteractionHandler saved1[2]; // port: clang has no array-from-array initialiser (IDO copies)
+    PORT_ARRAY_INIT(saved1, charmander_tg_FallingDown);
+#else
     InteractionHandler saved1[2] = charmander_tg_FallingDown;
+#endif
+#ifdef PORT
+    InteractionHandler saved2[2]; // port: clang has no array-from-array initialiser (IDO copies)
+    PORT_ARRAY_INIT(saved2, charmander_tg_LyingOnGround);
+#else
     InteractionHandler saved2[2] = charmander_tg_LyingOnGround;
+#endif
 
     cmdSendCommandToLink(LINK_POKEMON, VOLCANO_CMD_ANOTHER_CHARMANDER_HIT, obj);
     Pokemon_SetAnimation(obj, &charmander_animation_fall);
@@ -489,7 +499,12 @@ static void nullsub(void) {
 }
 
 POKEMON_FUNC(charmander_HitByApple)
+#ifdef PORT
+    InteractionHandler saved1[2]; // port: clang has no array-from-array initialiser (IDO copies)
+    PORT_ARRAY_INIT(saved1, charmander_tg_ShakingHands);
+#else
     InteractionHandler saved1[2] = charmander_tg_ShakingHands;
+#endif
 
     Pokemon_SetAnimation(obj, &charmander_animation_shakehands);
     Pokemon_StartPathProc(obj, NULL);
@@ -599,7 +614,12 @@ POKEMON_FUNC(charmander_MoveTurnToPlayer2)
 }
 
 POKEMON_FUNC(charmander_SummonFriend)
+#ifdef PORT
+    InteractionHandler saved1[5]; // port: clang has no array-from-array initialiser (IDO copies)
+    PORT_ARRAY_INIT(saved1, charmander_tg_BeingSummoned);
+#else
     InteractionHandler saved1[5] = charmander_tg_BeingSummoned;
+#endif
 
     Pokemon_SetAnimation(obj, &charmander_animation_roar);
     if (pokemon->behavior == 1) {

@@ -1,0 +1,437 @@
+#!/usr/bin/env python3
+"""Pokémon Snap wasm32 port build (session S2 skeleton). Runs inside the pokemonsnap-emsdk container from the repo
+root: port/docker/run.sh port   (= python3 port/tools/port_build.py).
+
+Phases (outputs in port/build/, gitignored; nothing here reads the ROM or the matching build's outputs):
+  1. census     every object of the matching link (port/symbols/objects.tsv) + every src/**/*.c on disk, classified
+                (port/symbols/asset_tus.tsv, symbols.tsv) into what the port does with it -> port/census.tsv
+  2. C -> IR    each TU the port compiles: clang -O0 IR without optnone (port/build/ll/<tag>.ll), incremental
+  3. sigs       one canonical signature per function over all game IR (port/tools/sigs.py) -> port/build/sigdb.json
+  4. vbe        virtual big-endian rewrite + call-site normalisation (port/tools/vbe.py), then -O1 -> port/build/vobj
+  5. PC layer   port/ultra/*.c and port/boot/*.c, native (no vbe) -> port/build/pc
+  6. stubs      undefined symbols of the link: RDRAM data symbols -> labels in the RDRAM mirror (n64_rdram), game /
+                libultra functions without a port body -> logged stubs with their canonical signature
+                (port/tools/gen_stubs.py) -> port/build/gen, port/stubs.tsv
+  7. link       emcc -> port/build/web/pokemonsnap.{js,wasm} (undefined symbols are an error)
+"""
+import collections, concurrent.futures as cf, hashlib, json, os, re, subprocess, sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+OUT = 'port/build'
+LL, VOBJ, PCOBJ, GEN, WEB = (f'{OUT}/{d}' for d in ('ll', 'vobj', 'pc', 'gen', 'web'))
+SYM = 'port/symbols'
+RDRAM = (0x80000000, 0x80800000)
+
+INC = ['-Iport/include', '-Iinclude', '-Isrc', '-Iultralib/include', '-Iultralib/include/ido', '-Iultralib/include/PR',
+       '-Iultralib/src', f'-I{OUT}/include', '-I.']
+DEFS = ['-DPORT', '-DF3DEX_GBI_2', '-D_LANGUAGE_C', '-DNDEBUG', '-D_FINALROM', '-D_MIPS_SZLONG=32', '-D_MIPS_SZINT=32']
+BASE = ['emcc', '-std=gnu89', '-nostdinc', '-fno-builtin', '-fno-strict-aliasing', '-fwrapv', '-funsigned-char',
+        '-g0', '-include', 'port/include/port_prefix.h'] + DEFS + INC
+# -funsigned-char: IDO's default (configure.py passes no -signed). Sources are compiled in EUC-JP like the matching
+# build (asm-processor --output-enc=EUC-JP): see to_ll().
+# IDO accepts these; clang >= 15/16 makes them errors by default (same list as the Conker port)
+RELAX = ['-Wno-error=int-conversion', '-Wno-error=incompatible-pointer-types',
+         '-Wno-error=incompatible-function-pointer-types', '-Wno-error=implicit-int',
+         '-Wno-error=implicit-function-declaration', '-Wno-error=return-type', '-Wno-error=return-mismatch',
+         '-Wno-error=int-to-pointer-cast', '-Wno-unknown-pragmas', '-Wno-error=pointer-sign']
+# -fno-discard-value-names: clang's va_arg lowering names its pointers %argp.cur*, which vbe.py needs (the variadic
+# buffer is written by the wasm backend in native layout, so 64-bit va_arg loads must not be half-swapped)
+LL_FLAGS = ['-S', '-emit-llvm', '-O0', '-Xclang', '-disable-O0-optnone', '-fno-discard-value-names']
+O1_FLAGS = ['-c', '-O1', '-g0', '-Wno-everything']
+PC_FLAGS = ['emcc', '-c', '-O2', '-g0', '-std=gnu11', '-Wall', '-Wno-unused-parameter', '-Wno-unused-function',
+            '-Iport/ultra', f'-I{OUT}/gen']
+# ultralib files that configure.py builds as libultra VERSION_J (kept for the TUs the port compiles)
+VERSION_J = {'aisetfreq', 'cartrominit', 'contpfs', 'contramread', 'contramwrite', 'contreaddata', 'crc', 'epirawdma',
+             'epirawread', 'epirawwrite', 'gbpakcheckconnector', 'gbpakgetstatus', 'gbpakinit', 'gbpakpower',
+             'gbpakreadid', 'gbpakreadwrite', 'gbpaksetbank', 'motor', 'pfschecker', 'pfsfilestate', 'pfsgetstatus',
+             'pfsinitpak', 'pimgr', 'pfsselectbank', 'sirawdma', 'vimgr', 'viswapcontext', 'devmgr', 'epiread',
+             'epiwrite', 'initialize', 'pirawdma', 'pirawread', 'sirawread'}
+# libultra directories whose C the port compiles as game code (pure computation on game memory); everything else
+# in ultralib (os/, io/, debug/: threads, messages, the RCP, PI/SI/VI/AI) is replaced by the PC layer.
+ULTRA_COMPILE = ('ultralib/src/gu/', 'ultralib/src/libc/', 'ultralib/src/audio/', 'ultralib/src/sp/',
+                 'ultralib/src/vimodes/')
+# game TUs that are libultra replaced by the PC layer
+PC_REPLACED = {'src/os/osFlash.c': 'FlashRAM driver (PC layer: native flash image, S8)'}
+
+ACTIONS = {  # category -> (action, what happens to it)
+    'game': ('compile', 'game C, compiled through vbe'),
+    'game-data': ('compile', 'game C data only (no asset include), compiled through vbe'),
+    'game-mixed': ('compile', 'game C with asset includes: compiled with -DPORT, the includes left out'),
+    'asset': ('rom', 'asset data only (#include assets/...): not compiled; symbols are RDRAM mirror labels, bytes from the ROM'),
+    'ultra-lib': ('compile', 'libultra C (gu/libc/audio/sp/vimodes), compiled through vbe'),
+    'ultra-pc': ('pc', 'libultra os/io/debug C: replaced by the PC layer (logged stubs until written)'),
+    'ultra-asm': ('pc', 'libultra assembly: replaced by the PC layer (pc_libc.c or logged stubs)'),
+    'pc-replaced': ('pc', 'game TU that is a hardware driver: replaced by the PC layer'),
+    'entry': ('pc', 'boot assembly (bss clear, jump to game_main): port/boot/main.c'),
+    'rsp': ('hle', 'RSP microcode .incbin: not built; the renderer / audio HLE replace it'),
+    'asm-data': ('rom', 'unmapped data (asm/data .s): mirror labels, bytes from the ROM'),
+    'rom-bin': ('rom', 'binary segment (audio, textures, fx, vpk0): read from the ROM at run time'),
+    'unlinked': ('none', 'C file on disk that the matching link does not contain'),
+}
+
+
+def tsv(path):
+    rows = []
+    for l in open(path):
+        if l.startswith('#') or not l.strip():
+            continue
+        rows.append(l.rstrip('\n').split('\t'))
+    return rows
+
+
+def src_of(obj):
+    """build/src/sys/main.c.o -> src/sys/main.c ; build/assets/x.bin.o -> assets/x.bin"""
+    p = obj[len('build/'):] if obj.startswith('build/') else obj
+    return p[:-2] if p.endswith('.o') else p
+
+
+def census():
+    objs = tsv(f'{SYM}/objects.tsv')
+    syms = tsv(f'{SYM}/symbols.tsv')
+    assets = {r[0]: r for r in tsv(f'{SYM}/asset_tus.tsv')}
+    seg_of, sections = {}, collections.defaultdict(set)
+    for out_sec, in_sec, obj, vram, size, rom, seg in objs:
+        seg_of.setdefault(obj, seg)
+        sections[obj].add(in_sec)
+    nfunc = collections.Counter(r[8] for r in syms if r[4] == 'func')
+    rows = []
+    linked = set()
+    for obj in sorted(seg_of):
+        src = src_of(obj)
+        linked.add(src)
+        nf = nfunc.get(obj, 0)
+        if src.endswith('.c'):
+            if src.startswith('ultralib/'):
+                cat = 'ultra-lib' if src.startswith(ULTRA_COMPILE) else 'ultra-pc'
+            elif src in PC_REPLACED:
+                cat = 'pc-replaced'
+            elif src in assets:
+                cat = 'game-mixed' if assets[src][4] == 'yes' else 'asset'
+            else:
+                cat = 'game' if nf else 'game-data'
+        elif src.startswith('ultralib/'):
+            cat = 'ultra-asm'
+        elif src.startswith('src/entry/'):
+            cat = 'entry'
+        elif src.startswith('src/rsp/'):
+            cat = 'rsp'
+        elif src.startswith('asm/'):
+            cat = 'asm-data'
+        else:
+            cat = 'rom-bin'
+        rows.append([src, seg_of[obj], cat, ACTIONS[cat][0], str(nf), ','.join(sorted(sections[obj]))])
+    for dp, dn, fn in os.walk('src'):
+        for f in fn:
+            p = os.path.join(dp, f)
+            if f.endswith('.c') and p not in linked:
+                rows.append([p, '-', 'unlinked', 'none', '0', '-'])
+    return rows
+
+
+# ---------------------------------------------------------------- incremental keys
+_hash = {}
+
+
+def fhash(p):
+    if p not in _hash:
+        try:
+            _hash[p] = hashlib.sha1(open(p, 'rb').read()).hexdigest()
+        except OSError:
+            _hash[p] = 'missing'
+    return _hash[p]
+
+
+def key(parts, files):
+    h = hashlib.sha1()
+    for x in parts:
+        h.update(x.encode() + b'\0')
+    for f in sorted(set(files)):
+        h.update(f.encode() + b'=' + fhash(f).encode() + b'\0')
+    return h.hexdigest()
+
+
+def parse_dep(path):
+    try:
+        txt = open(path).read().replace('\\\n', ' ')
+    except OSError:
+        return None
+    deps = txt.split(':', 1)[1].split() if ':' in txt else []
+    return [os.path.normpath(d) for d in deps]
+
+
+def jload(p):
+    try:
+        return json.load(open(p))
+    except (OSError, ValueError):
+        return None
+
+
+def tag_of(src):
+    return src[:-2].replace('/', '__')
+
+
+def tu_flags(src):
+    stem = os.path.basename(src)[:-2]
+    ver = 'VERSION_J' if src.startswith('ultralib/') and stem in VERSION_J else 'VERSION_I'
+    return BASE + RELAX + [f'-DBUILD_VERSION={ver}']
+
+
+def to_ll(src):
+    tag = tag_of(src)
+    ll, kf, dep = f'{LL}/{tag}.ll', f'{LL}/{tag}.key', f'{LL}/{tag}.d'
+    flags = tu_flags(src) + LL_FLAGS
+    old = jload(kf)
+    if old and os.path.exists(ll) and old['key'] == key([' '.join(flags)], [src] + old['deps']):
+        return src, 0, old.get('warn', ''), False
+    if os.path.exists(kf):
+        os.remove(kf)
+    raw = open(src, 'rb').read()
+    cin, extra = src, []
+    if any(b > 0x7F for b in raw):
+        # the matching build feeds IDO the TU in EUC-JP (asm-processor --output-enc=EUC-JP): Japanese character
+        # constants ('あ' = 0xA4A2) and strings must have those bytes, so the port compiles an EUC-JP copy of the TU
+        # (its own includes are found through -iquote of the original directory; headers are ASCII)
+        cin = f'{OUT}/euc/{src}'
+        os.makedirs(os.path.dirname(cin), exist_ok=True)
+        open(cin, 'wb').write(raw.decode('utf-8').encode('euc_jp'))
+        extra = ['-iquote', os.path.dirname(src)]
+    p = subprocess.run(flags[:1] + extra + flags[1:] + ['-MD', '-MF', dep, cin, '-o', ll], capture_output=True, text=True)
+    if p.returncode:
+        return src, 1, errors_only(p.stderr), True
+    deps = [d for d in parse_dep(dep) or [] if d not in (src, cin)]
+    rom = [d for d in deps if d.startswith(('assets/', 'build/', 'asm/'))]
+    if rom:  # ROM-free rule: no TU of the port may include anything extracted from the ROM
+        os.remove(ll)
+        return src, 1, 'includes ROM-derived files: ' + ' '.join(rom[:5]), True
+    warn = summarize_warnings(p.stderr)
+    json.dump({'key': key([' '.join(flags)], [src] + deps), 'deps': deps, 'warn': warn}, open(kf, 'w'))
+    return src, 0, warn, True
+
+
+def errors_only(stderr):
+    ls = stderr.splitlines()
+    keep = [i for i, l in enumerate(ls) if ' error: ' in l or l.startswith('error:')]
+    out = []
+    for i in keep[:10]:
+        out += ls[i:i + 3]
+    return '\n'.join(out) or stderr[-3000:]
+
+
+WARN = re.compile(r'warning: .*\[(-W[^\]]+)\]')
+
+
+def summarize_warnings(stderr):
+    c = collections.Counter(WARN.findall(stderr))
+    return ' '.join(f'{k[2:]}={v}' for k, v in c.most_common())
+
+
+TOOLS = ['port/tools/vbe.py', 'port/tools/sigs.py']
+
+
+def build_obj(src, sig_hash, abs_hash):
+    tag = tag_of(src)
+    ll, vll, obj, kf = f'{LL}/{tag}.ll', f'{LL}/{tag}.v.ll', f'{VOBJ}/{tag}.o', f'{VOBJ}/{tag}.key'
+    k = key([(jload(f'{LL}/{tag}.key') or {}).get('key', 'none'), sig_hash, abs_hash, ' '.join(O1_FLAGS)], TOOLS)
+    old = jload(kf)
+    if old and old['key'] == k and os.path.exists(obj):
+        return src, 0, old['stats'], False
+    if os.path.exists(kf):
+        os.remove(kf)
+    p = subprocess.run([sys.executable, 'port/tools/vbe.py', ll, vll, f'{OUT}/sigdb.json', f'{OUT}/abs_syms.txt'],
+                       capture_output=True, text=True)
+    if p.returncode:
+        return src, 2, p.stderr[-3000:], True
+    stats = p.stdout.strip().split(' ', 1)[1] if ' ' in p.stdout.strip() else ''
+    q = subprocess.run(['emcc'] + O1_FLAGS + [vll, '-o', obj], capture_output=True, text=True)
+    if q.returncode:
+        return src, 3, q.stderr[-3000:], True
+    json.dump({'key': k, 'stats': stats}, open(kf, 'w'))
+    return src, 0, stats, True
+
+
+def write_if_changed(path, text):
+    try:
+        if open(path).read() == text:
+            return False
+    except OSError:
+        pass
+    open(path, 'w').write(text)
+    return True
+
+
+def abs_table():
+    """absolute link symbols (not KSEG0 RAM): name -> value. Globals only, never a function."""
+    out = {}
+    for r in tsv(f'{SYM}/symbols.tsv'):
+        name, vram, rom, size, typ, bind = r[:6]
+        if bind != 'global' or typ == 'func':
+            continue
+        v = int(vram, 16)
+        if not RDRAM[0] <= v < RDRAM[1]:
+            out[name] = v
+    return out
+
+
+def ld_addrs_header():
+    """port/build/include/ld_addrs.h: the extern declarations of the segment link symbols (the matching build gets
+    them from splat in build/include; the port writes its own from the frozen symbol table, names only)."""
+    pat = re.compile(r'^\w+_(ROM_START|ROM_END|VRAM|VRAM_END|(TEXT|DATA|RODATA|BSS)_(START|END|SIZE))$')
+    names = sorted({r[0] for r in tsv(f'{SYM}/symbols.tsv') if r[5] == 'global' and pat.match(r[0])})
+    txt = ('/* GENERATED by port/tools/port_build.py from port/symbols/symbols.tsv - do not edit. */\n'
+           '#ifndef _HEADER_SYMBOLS_H_\n#define _HEADER_SYMBOLS_H_\n\n#include "common.h"\n\n' +
+           ''.join(f'extern Addr {n};\n' for n in names) + '\n#endif\n')
+    os.makedirs(f'{OUT}/include', exist_ok=True)
+    write_if_changed(f'{OUT}/include/ld_addrs.h', txt)
+    return len(names)
+
+
+def run(cmd, **kw):
+    p = subprocess.run(cmd, capture_output=True, text=True, **kw)
+    return p.returncode, p.stdout, p.stderr
+
+
+def main():
+    for d in (LL, VOBJ, PCOBJ, GEN, WEB):
+        os.makedirs(d, exist_ok=True)
+    rows = census()
+    n_ld = ld_addrs_header()
+    absmap = abs_table()
+    write_if_changed(f'{OUT}/abs_syms.txt', ''.join(f'{k} {v:X}\n' for k, v in sorted(absmap.items())))
+    compile_srcs = [r[0] for r in rows if r[3] == 'compile']
+    status = {}
+    with cf.ThreadPoolExecutor(os.cpu_count() or 4) as pool:
+        nll = 0
+        ok = []
+        fails = {}
+        warns = {}
+        for src, rc, msg, rebuilt in pool.map(to_ll, compile_srcs):
+            nll += rebuilt
+            if rc:
+                fails[src] = ('C->IR', msg)
+            else:
+                ok.append(src)
+                warns[src] = msg
+        # phase 3: canonical signatures over every game TU's IR
+        import sigs
+        defs, sites = {}, collections.defaultdict(collections.Counter)
+        for src in ok:
+            sigs.scan(open(f'{LL}/{tag_of(src)}.ll').read(), defs, sites)
+        can = sigs.canonical(defs, sites)
+        write_if_changed(f'{OUT}/sigdb.json', json.dumps(can, sort_keys=True))
+        mism = sorted(f for f, c in sites.items() if len(c) > 1 or
+                      (f in defs and json.dumps(list(defs[f])[:2]) not in c))
+        _hash.pop(f'{OUT}/sigdb.json', None); _hash.pop(f'{OUT}/abs_syms.txt', None)
+        sig_hash, abs_hash = fhash(f'{OUT}/sigdb.json'), fhash(f'{OUT}/abs_syms.txt')
+        nobj = 0
+        tot = collections.Counter()
+        objs = []
+        for src, rc, msg, rebuilt in pool.map(lambda s: build_obj(s, sig_hash, abs_hash), ok):
+            nobj += rebuilt
+            if rc:
+                fails[src] = ({2: 'vbe', 3: 'IR->obj'}[rc], msg)
+                continue
+            objs.append(f'{VOBJ}/{tag_of(src)}.o')
+            status[src] = msg
+            for kv in msg.split():
+                k, v = kv.split('=')
+                tot[k] += int(v)
+    print(f'port_build: {len(compile_srcs)} TUs to compile, {nll} IR and {nobj} objects rebuilt, '
+          f'{len(fails)} failed; ld_addrs.h {n_ld} names; {len(absmap)} absolute symbols')
+    for src, (stage, msg) in sorted(fails.items()):
+        print(f'--- FAILED {src} ({stage})\n{msg}')
+    # short K&R calls (sigs.SHORT, written by vbe.py next to each .v.ll)
+    short = []
+    for src in ok:
+        try:
+            short += [src + '\t' + l for l in open(f'{LL}/{tag_of(src)}.v.ll.short').read().splitlines()]
+        except OSError:
+            pass
+    write_if_changed(f'{OUT}/short_calls.tsv', '# tu\tcaller\tcallee\tpassed\ttaken   (direct calls passing fewer '
+                     'words than the canonical signature; the missing ones are 0 in wasm)\n' + ''.join(s + '\n' for s in sorted(short)))
+    write_if_changed(f'{OUT}/sig_mismatch.txt', ''.join(f'{f}\t{json.dumps(defs.get(f))}\t{dict(sites[f])}\n' for f in mism))
+    write_if_changed(f'{OUT}/vbe_report.txt', 'transforms: ' + ' '.join(f'{k}={v}' for k, v in tot.most_common()) + '\n')
+    print(f'sigs: {len(can)} functions, {len(mism)} with mismatching call sites; {len(short)} short calls; '
+          f'vbe: ' + ' '.join(f'{k}={v}' for k, v in tot.most_common()))
+
+    # phase 5: PC layer (native)
+    pc_srcs = sorted(f'port/ultra/{f}' for f in os.listdir('port/ultra') if f.endswith('.c')) + \
+        sorted(f'port/boot/{f}' for f in os.listdir('port/boot') if f.endswith('.c'))
+    segtab_c = gen_segments()
+    pc_objs, pc_fail = [], False
+
+    def pc_one(src):
+        obj = f'{PCOBJ}/{src.replace("/", "__")[:-2]}.o'
+        rc, so, se = run(PC_FLAGS + [src, '-o', obj])
+        return src, obj, rc, se
+    with cf.ThreadPoolExecutor(os.cpu_count() or 4) as pool:
+        for src, obj, rc, se in pool.map(pc_one, pc_srcs + [segtab_c]):
+            if rc:
+                print(f'--- FAILED (PC layer) {src}\n{se[-3000:]}'); pc_fail = True
+            else:
+                if se.strip():
+                    print(se[-2000:])
+                pc_objs.append(obj)
+    if pc_fail:
+        write_census(rows, status, fails)
+        sys.exit(1)
+
+    # phase 6: stubs and mirror labels
+    write_census(rows, status, fails)
+    if fails:
+        sys.exit(1)
+    import gen_stubs
+    stub_objs, stub_rep = gen_stubs.generate(objs, pc_objs, can, OUT)
+
+    # phase 7: link
+    js = f'{WEB}/pokemonsnap.js'
+    link = ['emcc', f'{GEN}/rdram_labels.o'] + objs + pc_objs + [o for o in stub_objs if not o.endswith('rdram_labels.o')] + [
+        '-o', js, '-O1', '-sGLOBAL_BASE=256MB', '-sINITIAL_MEMORY=384MB', '-sALLOW_MEMORY_GROWTH=1',
+        '-sSTACK_SIZE=1MB', '-sASYNCIFY', '-sASYNCIFY_STACK_SIZE=65536', '-sMODULARIZE=1',
+        '-sEXPORT_NAME=createPokemonSnap', '-sINVOKE_RUN=0', '-sEXIT_RUNTIME=0', '-sENVIRONMENT=worker,node',
+        '-sERROR_ON_UNDEFINED_SYMBOLS=1', '-sEXPORTED_FUNCTIONS=_main,_malloc,_free,_port_set_rom,_port_stub_report',
+        '-sEXPORTED_RUNTIME_METHODS=HEAPU8,HEAP32,callMain', '--profiling-funcs',
+        '-Wl,--error-limit=0', f'-Wl,-Map={OUT}/pokemonsnap.map']
+    rc, so, se = run(link)
+    open(f'{OUT}/link_log.txt', 'w').write(se)
+    if rc:
+        print('--- LINK FAILED (port/build/link_log.txt)\n' + se[-6000:])
+        sys.exit(1)
+    nwarn = se.count('warning')
+    print(f'link OK: {js} ({os.path.getsize(js[:-3] + ".wasm")} bytes wasm), {nwarn} link warnings '
+          f'(port/build/link_log.txt); {stub_rep}')
+
+
+def gen_segments():
+    """port/build/gen/pc_segments.c: the segment table (name, ROM range, VRAM, bss) from port/symbols/segments.tsv"""
+    rows = tsv(f'{SYM}/segments.tsv')
+    h = lambda x: '0' if x in ('-', '') else '0x' + x
+    body = ''.join(f'    {{"{r[0]}", "{r[1]}", {h(r[2])}, {h(r[3])}, {h(r[4])}, {h(r[5])}, {h(r[6])}, {h(r[7])}}},\n'
+                   for r in rows if r[2] not in ('-', ''))
+    txt = ('/* GENERATED by port/tools/port_build.py from port/symbols/segments.tsv - do not edit. Offsets only. */\n'
+           '#include "pc_mem.h"\nconst PortSegment port_segments[] = {\n' + body + '};\n'
+           'const unsigned port_segment_count = sizeof(port_segments) / sizeof(port_segments[0]);\n')
+    p = f'{GEN}/pc_segments.c'
+    write_if_changed(p, txt)
+    return p
+
+
+def write_census(rows, status, fails):
+    cnt = collections.Counter()
+    out = []
+    for src, seg, cat, action, nf, secs in sorted(rows, key=lambda r: (r[2], r[0])):
+        if action == 'compile':
+            res = 'FAIL:' + fails[src][0] if src in fails else ('ok' if src in status else 'not-built')
+        else:
+            res = '-'
+        cnt[(cat, res)] += 1
+        out.append('\t'.join([src, seg, cat, action, nf, res]))
+    head = ('# tu\tsegment\tcategory\taction\tfunctions\tresult   (port/tools/port_build.py census: every object of the '
+            'matching link + every src/**/*.c on disk; categories in port_build.py ACTIONS; names only)\n')
+    write_if_changed('port/census.tsv', head + ''.join(l + '\n' for l in out))
+    summ = ''.join(f'{c:12} {r:14} {n:5}  {ACTIONS[c][1]}\n' for (c, r), n in sorted(cnt.items()))
+    write_if_changed(f'{OUT}/census_summary.txt', summ)
+    print('census (port/census.tsv):\n' + summ, end='')
+
+
+if __name__ == '__main__':
+    main()

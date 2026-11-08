@@ -175,7 +175,12 @@ POKEMON_FUNC(volcano_gate_Cutscene)
     GObj* camObj;
     GObj* player;
     s32 i;
+#ifdef PORT
+    u16 sp2C[2]; // port: clang has no array-from-array initialiser (IDO copies)
+    PORT_ARRAY_INIT(sp2C, volcano_gate_remainingPokemons);
+#else
     u16 sp2C[2] = volcano_gate_remainingPokemons;
+#endif
 
     Pokemon_RemovePokemons(sp2C);
     ohWait(1);

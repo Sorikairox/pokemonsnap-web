@@ -43,12 +43,17 @@ void func_beach_802C9348(GObj* obj) {
     omEndProcess(NULL);
 }
 
-void func_beach_802C93B8(GObj* obj) {
+void beach_5612B0_WaitForInteraction(GObj* obj) { /* was func_beach_802C93B8 */
     UNUSED s32 pad[3];
     Pokemon* pokemon = GET_POKEMON(obj);
 
     // TODO: potentially include data
+#ifdef PORT
+    InteractionHandler sp18[4]; // port: clang has no array-from-array initialiser (IDO copies)
+    PORT_ARRAY_INIT(sp18, D_beach_802CD438);
+#else
     InteractionHandler sp18[4] = D_beach_802CD438;
+#endif
 
     pokemon->transitionGraph = sp18;
     pokemon->processFlags |= POKEMON_PROCESS_FLAG_MOVEMENT_PAUSED;
