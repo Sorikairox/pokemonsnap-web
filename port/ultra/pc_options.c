@@ -147,3 +147,35 @@ int port_pad_filter(int buttons) {
     }
     return out;
 }
+
+/* ---------------------------------------------------------------- the Options menu row (src/main_menu, #ifdef PORT) */
+/* The game's 12-pixel font (4 bits per pixel, 12 x 12, 370 glyphs in UIText_CharTable order) lives in the window
+ * overlay's data (D_80378254_84BA04, used by window/text.c), which the title scene does not load: copied from the
+ * player's ROM into port memory (vbe layout, as game code reads it) the first time the menu asks. */
+#define FONT12_ROM 0x84BA04u
+#define FONT12_SIZE (370 * 72)
+void *port_menu_font12(void) {
+    static unsigned char *font;
+    if (!font) {
+        font = malloc(FONT12_SIZE);
+        if (!font || port_rom_copy(font, FONT12_ROM, FONT12_SIZE) != 0) {
+            port_log("[option] menu font: ROM copy failed\n");
+            free(font);
+            font = NULL;
+        }
+    }
+    return font;
+}
+
+/* image memory for the menu's text sprites (bitmaps + RGBA16 pixels), kept for the session: slot -> buffer */
+void *port_menu_alloc(int slot, int bytes) {
+    static void *buf[8];
+    static int size[8];
+    if (slot < 0 || slot >= 8 || bytes <= 0) return NULL;
+    if (size[slot] < bytes) {
+        free(buf[slot]);
+        buf[slot] = malloc((size_t)bytes); /* 8-byte aligned: enough for RGBA16 rows and Bitmap words */
+        size[slot] = buf[slot] ? bytes : 0;
+    }
+    return buf[slot];
+}

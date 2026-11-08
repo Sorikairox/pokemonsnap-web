@@ -4,10 +4,13 @@
 //   node port/rtw/e2e.mjs [build dir] [out dir]       (defaults port/build/rtw/dist, port_work/s9/e2e)
 // Env: RTW_REPO (default ~/Code/retrowser), ROM (default "./Pokemon Snap (USA).n64": the player's file, byte-swapped
 // .n64, converted by the host), SAVE (a FlashRAM image for the import / continue phase, default
-// port_work/merge_all/flash.fla), CHROME_PATH, PHASES (default "desk,touch,wrong,offline").
+// port_work/merge_all/flash.fla), CHROME_PATH, PHASES (default "desk,touch,options,wrong,offline").
 // Phases: desk   boot from the ROM picker (remembered), input, audio, pacing, pause, save import -> Continue ->
 //                Oak's lab -> Save (the host stores the new image; snap_save.py checks it), reload + continue;
 //         touch  phone portrait 390x844 and landscape 844x390 (isMobile, hasTouch): pictures, touch A reaches the pad;
+//                the Snap extra button (F1) is shown and reaches the pad as bit 16;
+//         options  (F1) the host passes option 1 at start, the game's Options menu changes it (rtw_option_changed),
+//                the host remembers it across a reload; the Snap key (Digit1) reaches the pad;
 //         wrong  a ROM with one byte changed: the host's wrong-ROM warning, then the module's plain refusal;
 //         offline  every server stopped, the network off: reload, boot from the caches and the remembered ROM.
 // Screenshots and the stored save go to the out dir (game pictures: local only, never commit). Every server and
@@ -24,7 +27,7 @@ const outDir = resolve(process.argv[3] || join(ROOT, 'port_work/s9/e2e'));
 const RTW = process.env.RTW_REPO || join(process.env.HOME, 'Code/retrowser');
 const ROM = resolve(process.env.ROM || join(ROOT, 'Pokemon Snap (USA).n64'));
 const SAVE = resolve(process.env.SAVE || join(ROOT, 'port_work/merge_all/flash.fla'));
-const PHASES = (process.env.PHASES || 'desk,touch,wrong,offline').split(',');
+const PHASES = (process.env.PHASES || 'desk,touch,options,wrong,offline').split(',');
 const chromePath = process.env.CHROME_PATH || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 mkdirSync(outDir, { recursive: true });
 for (const f of [join(buildDir, 'retrowser.json'), ROM]) if (!existsSync(f)) { console.error(`missing ${f}`); process.exit(2); }
@@ -257,6 +260,24 @@ async function touch() {
         }
       }
       check(`touch ${name}: the A button reached pad 0`, b && /pad0 buttons 8000/.test(await L.text()), b ? '' : 'no [data-touch=A]');
+      // F1: the manifest's extra button "Snap" (controls.extra bit 16) is on the layout, inside the view, and reaches
+      // pad 0 as bit 16
+      const sb = await page.locator('[data-touch=x16]').first().boundingBox().catch(() => null);
+      const label = sb ? (await page.locator('[data-touch=x16]').first().textContent()) : '';
+      check(`touch ${name}: the Snap button is shown`, sb && sb.width >= 20 && sb.height >= 20 && sb.x >= 0 && sb.y >= 0 &&
+        sb.x + sb.width <= w && sb.y + sb.height <= h && /Snap/.test(label), sb ? `${label} ${Math.round(sb.x)},${Math.round(sb.y)} ${Math.round(sb.width)}x${Math.round(sb.height)}` : 'no [data-touch=x16]');
+      if (sb) {
+        const cdp = await ctx.newCDPSession(page);
+        const pt = [{ x: sb.x + sb.width / 2, y: sb.y + sb.height / 2, id: 8, radiusX: 2, radiusY: 2, force: 1 }];
+        for (let i = 0; i < 3 && !/pad0 buttons 10000/.test(await L.text()); i++) {
+          await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: pt });
+          await sleep(150);
+          if (!i) await shot(page, `touch-${name}-Snap-down`, true);
+          await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+          await sleep(800);
+        }
+        check(`touch ${name}: the Snap button reached pad 0 (bit 16)`, /pad0 buttons 10000/.test(await L.text()));
+      }
       const boxes = await page.evaluate(() => [...document.querySelectorAll('[data-touch], [data-field=screen]')].map((e) => {
         const r = e.getBoundingClientRect(); return `${e.dataset.touch ?? 'screen'} ${Math.round(r.x)},${Math.round(r.y)} ${Math.round(r.width)}x${Math.round(r.height)}`;
       }));
@@ -264,6 +285,57 @@ async function touch() {
       writeFileSync(join(outDir, `log-touch-${name}.txt`), await L.text());
     } finally { L.stop(); await ctx.close(); }
   }
+}
+
+// F1: option 1 "Snap button" (inGame): the host passes its value at start (rtw_option), the game's Options menu
+// changes it (rtw_option_changed), the host remembers it across a reload; the Snap key (Digit1) reaches pad 0.
+async function options() {
+  const ctx = await newCtx();
+  const page = await ctx.newPage();
+  page.on('pageerror', (e) => errors.push(e.message));
+  const L = logger(page);
+  // boot -> Start (skips the intro to "PRESS START") -> Start (title menu; no save: New Game / Options) -> Options.
+  // A presses through the intro (as desk does) can land on the menu and pick New Game: Start only reaches the menu.
+  const toOptions = async (tag) => {
+    await sleep(3000);
+    await press(page, 'Enter', 200); await sleep(5000);
+    await press(page, 'Enter', 200); await sleep(2500);
+    await press(page, 'ArrowDown'); await sleep(1500);
+    await press(page, 'KeyX'); await sleep(3500);
+    await shot(page, `options-${tag}`);
+  };
+  try {
+    await openGame(page, { remember: true });
+    await page.waitForSelector('[data-state=playing]', { timeout: 180000 });
+    await L.wait(/rtw: game started/, 90);
+    const t0 = await L.text();
+    check('options: the host passes the default at start (rtw_option 1 = 1)', /rtw: option 1 = 1 from the host/.test(t0),
+      (t0.match(/rtw: option.*/) || ['no rtw_option line'])[0]);
+    await press(page, 'Digit1', 200); await sleep(500);
+    check('options: the Snap key (Digit1) reaches pad 0 as bit 16', /pad0 buttons 10000/.test(await L.text()));
+    await toOptions('menu');
+    for (let i = 0; i < 4; i++) { await press(page, 'ArrowDown'); await sleep(1000); }   // rows 1, 2, 3, Snap Button
+    await shot(page, 'options-snap-row');
+    await press(page, 'KeyX'); await sleep(1200);
+    await press(page, 'ArrowRight'); await sleep(1200);
+    await shot(page, 'options-snap-off');
+    await press(page, 'KeyX'); await sleep(1200);
+    await press(page, 'ArrowDown'); await sleep(1000);    // Return
+    await press(page, 'KeyX');
+    const ch = await L.wait(/rtw: option 1 = 0 changed in the game's Options menu/, 20);
+    check('options: the game\'s menu reports the change (rtw_option_changed 1 = 0)', !!ch, ch ?? 'no line');
+    await sleep(2000);
+    await L.reset();
+    await page.reload();
+    console.log('options reload: ' + await openGame(page, { stored: true }));
+    await page.waitForSelector('[data-state=playing]', { timeout: 180000 });
+    await L.wait(/rtw: game started/, 90);
+    const t1 = await L.text();
+    check('options: after a reload the host passes the remembered value (rtw_option 1 = 0)', /rtw: option 1 = 0 from the host/.test(t1),
+      (t1.match(/rtw: option.*/) || ['no rtw_option line'])[0]);
+    await toOptions('menu-reload');   // the row shows Off
+    writeFileSync(join(outDir, 'log-options.txt'), await L.text());
+  } finally { L.stop(); await ctx.close(); }
 }
 
 async function wrong() {
@@ -314,7 +386,7 @@ async function offline() {
 try {
   for (const p of PHASES) {
     console.log(`== ${p}`);
-    try { await ({ desk, title, touch, wrong, offline })[p](); } catch (e) { check(`${p}: ran`, false, e.stack || String(e)); }
+    try { await ({ desk, title, touch, options, wrong, offline })[p](); } catch (e) { check(`${p}: ran`, false, e.stack || String(e)); }
   }
   check('no page errors', errors.length === 0, errors.slice(0, 3).join(' | '));
 } finally {

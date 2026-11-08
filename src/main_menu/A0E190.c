@@ -20,6 +20,20 @@ u32 D_800E8370_A0F900;
 s8 D_800E8374_A0F904;
 s8 D_800E8375_A0F905;
 SObj* D_800E8378_A0F908[5];
+#ifdef PORT
+/* port (F1): row 5 is the Snap Button row (A0D4D0.c port_OptionsCreateSnapRow), shown between rows 3 and 4. The
+ * labels need 6 entries; the console's array keeps its size (the port lays this .bss out at the console's addresses,
+ * a 6th entry would be D_800E838C_A0F91C), so this file uses port_OptLabels instead. */
+SObj* port_OptLabels[6];
+#define D_800E8378_A0F908 port_OptLabels
+#define PORT_OPT_SNAP_BUTTON 1
+#define PORT_ROW_SNAP 5
+extern GObj* port_OptSnapValues;
+extern GObj* port_OptSnapHelp;
+s32 port_option_get(s32 id);
+void port_option_set_by_game(s32 id, s32 value);
+s8 port_OptSnapChoice; /* 0 On, 1 Off (left / right, as D_800E8394_A0F924 for Sound) */
+#endif
 GObj* D_800E838C_A0F91C;
 GObj* D_800E8390_A0F920;
 s8 D_800E8394_A0F924;
@@ -226,6 +240,15 @@ void func_800E71DC_A0E76C(void) {
         func_800E6C00_A0E190(D_800E835C_A0F8EC->data.sobj, 0xFF);
         func_800E6C14_A0E1A4(D_800E835C_A0F8EC->data.sobj->next, 0xFF, 0x82, 0x41);
     }
+#ifdef PORT
+    port_OptSnapChoice = !port_option_get(PORT_OPT_SNAP_BUTTON);
+    func_800E6C14_A0E1A4(port_OptSnapValues->data.sobj, 0xFF, 0x82, 0x41);
+    func_800E6C00_A0E190(port_OptSnapValues->data.sobj->next, 0xFF);
+    if (port_OptSnapChoice != 0) {
+        func_800E6C00_A0E190(port_OptSnapValues->data.sobj, 0xFF);
+        func_800E6C14_A0E1A4(port_OptSnapValues->data.sobj->next, 0xFF, 0x82, 0x41);
+    }
+#endif
     if (D_800E8396_A0F926 == 0) {
         func_800E6C14_A0E1A4(D_800E8360_A0F8F0->data.sobj, 0xFF, 0x82, 0x41);
         func_800E6C00_A0E190(D_800E8360_A0F8F0->data.sobj->next, 0xFF);
@@ -303,7 +326,11 @@ void func_800E7604_A0EB94(GObj* arg0) {
     SObj* sobj;
     s8 var_s1;
     s8 i;
+#ifdef PORT
+    SObj* sp34[6]; /* 5 descriptions (the console wrote the 5th past the end of [4]) + the Snap Button row's */
+#else
     SObj* sp34[4];
+#endif
 
     sobj = D_800E8344_A0F8D4->data.sobj;
     i = 0;
@@ -350,14 +377,26 @@ s8 func_800E7700_A0EC90(void) {
         } else {
             if (temp_v0_2->pressedButtons & STICK_SLOW_UP) {
                 auPlaySoundWithParams(0x41, 0x7FFF, 0x40, 1.0f, 0);
+#ifdef PORT /* rows from the top: 0 1 2 3 5 (Snap Button) 4 (Return) */
+                D_800E8374_A0F904 = D_800E8374_A0F904 == 4 ? PORT_ROW_SNAP
+                                    : D_800E8374_A0F904 == PORT_ROW_SNAP ? 3
+                                    : D_800E8374_A0F904 == 0 ? 4 : D_800E8374_A0F904 - 1;
+#else
                 D_800E8374_A0F904--;
                 if (D_800E8374_A0F904 < 0) {
                     D_800E8374_A0F904 = 4;
                 }
+#endif
             } else if (temp_v0_2->pressedButtons & STICK_SLOW_DOWN) {
                 auPlaySoundWithParams(0x41, 0x7FFF, 0x40, 1.0f, 0);
+#ifdef PORT
+                D_800E8374_A0F904 = D_800E8374_A0F904 == 3 ? PORT_ROW_SNAP
+                                    : D_800E8374_A0F904 == PORT_ROW_SNAP ? 4
+                                    : D_800E8374_A0F904 == 4 ? 0 : D_800E8374_A0F904 + 1;
+#else
                 D_800E8374_A0F904++;
                 D_800E8374_A0F904 %= 5;
+#endif
             }
             ohWait(1);
         }
@@ -398,6 +437,11 @@ void func_800E7950_A0EEE0(GObj* arg0) {
         case 3:
             sobj = D_800E8360_A0F8F0->data.sobj;
             break;
+#ifdef PORT
+        case PORT_ROW_SNAP:
+            sobj = port_OptSnapValues->data.sobj;
+            break;
+#endif
     }
     sp40[0] = sobj;
     sp40[1] = sobj->next;
@@ -460,6 +504,11 @@ void func_800E7B24_A0F0B4(GObj* arg0) {
         case 3:
             var_v0 = D_800E8354_A0F8E4->data.sobj;
             break;
+#ifdef PORT
+        case PORT_ROW_SNAP:
+            var_v0 = port_OptSnapHelp->data.sobj;
+            break;
+#endif
     }
     sp38[0] = var_v0;
     sp38[1] = var_v0->next;
@@ -495,6 +544,12 @@ void func_800E7C40_A0F1D0(void) {
             sobj = D_800E8360_A0F8F0->data.sobj;
             D_800E8375_A0F905 = D_800E8396_A0F926;
             break;
+#ifdef PORT
+        case PORT_ROW_SNAP:
+            sobj = port_OptSnapValues->data.sobj;
+            D_800E8375_A0F905 = port_OptSnapChoice;
+            break;
+#endif
     }
 
     sp44[0] = sobj;
@@ -545,6 +600,12 @@ void func_800E7C40_A0F1D0(void) {
             D_800E8396_A0F926 = D_800E8375_A0F905;
             sobj = D_800E8354_A0F8E4->data.sobj;
             break;
+#ifdef PORT
+        case PORT_ROW_SNAP:
+            port_OptSnapChoice = D_800E8375_A0F905;
+            sobj = port_OptSnapHelp->data.sobj;
+            break;
+#endif
     }
     sobj->sprite.attr |= SP_HIDDEN;
     sobj->next->sprite.attr |= SP_HIDDEN;
@@ -577,6 +638,9 @@ void func_800E7F98_A0F528(void) {
             case 1:
             case 2:
             case 3:
+#ifdef PORT
+            case PORT_ROW_SNAP:
+#endif
                 func_800E7C40_A0F1D0();
                 break;
             case 4:
@@ -584,6 +648,10 @@ void func_800E7F98_A0F528(void) {
                 setPlayerFlag(PFID_9, D_800E8394_A0F924);
                 setPlayerFlag(PFID_ZOOM_SWITCH, D_800E8395_A0F925);
                 setPlayerFlag(PFID_INVERTED_Y, D_800E8396_A0F926);
+#ifdef PORT
+                /* not a player flag: the host keeps it (rtw_option_changed), the save stays the console's */
+                port_option_set_by_game(PORT_OPT_SNAP_BUTTON, !port_OptSnapChoice);
+#endif
                 cond = true;
                 break;
         }
