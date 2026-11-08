@@ -1193,8 +1193,12 @@ static void put_vtx(float x, float y, float z, float w, const float *col, float 
 
 /* debug (port_gfx_set_probe): while commands are logged, every primitive covering the probe pixel (N64 pixels of the
  * current colour image) is logged with the state it is drawn with */
-static float probe_x = -1, probe_y = -1;
-void port_gfx_set_probe(int x, int y) { probe_x = (float)x + 0.5f; probe_y = (float)y + 0.5f; }
+static float probe_pt[4][2];
+static int probe_n;
+void port_gfx_set_probe(int x, int y) {
+    if (x < 0) { probe_n = 0; return; }
+    if (probe_n < 4) { probe_pt[probe_n][0] = (float)x + 0.5f; probe_pt[probe_n][1] = (float)y + 0.5f; probe_n++; }
+}
 static void probe_state(void) {
     for (int i = 0; i < 8; i++) {
         const Tile *tl = &tiles[i];
@@ -1206,30 +1210,38 @@ static void probe_state(void) {
              om_h, om_l, cc_w0, cc_w1, prim_color, env_color, fog_color, gfx_geom, gfx_tex_on, gfx_tex_tile, gfx_tex_level);
 }
 static void probe_tri(const GfxVtx *v[3]) {
-    if (probe_x < 0 || !gfx_log_ops) return;
+    if (!probe_n || !gfx_log_ops) return;
     /* homogeneous 2D rasterisation (no clipping needed): e_i = (v_j x v_k) . (px, py, 1), inside when all e_i have
      * the sign of det = v_0 . (v_1 x v_2) */
-    double V[3][3], e[3], det;
+    double V[3][3], c[3][3], det;
     for (int i = 0; i < 3; i++) { V[i][0] = v[i]->x; V[i][1] = v[i]->y; V[i][2] = v[i]->w; }
     for (int i = 0; i < 3; i++) {
         const double *a = V[(i + 1) % 3], *b = V[(i + 2) % 3];
-        double cx = a[1] * b[2] - a[2] * b[1], cy = a[2] * b[0] - a[0] * b[2], cw = a[0] * b[1] - a[1] * b[0];
-        e[i] = cx * probe_x + cy * probe_y + cw;
-        if (i == 0) det = cx * V[0][0] + cy * V[0][1] + cw * V[0][2];
+        c[i][0] = a[1] * b[2] - a[2] * b[1]; c[i][1] = a[2] * b[0] - a[0] * b[2]; c[i][2] = a[0] * b[1] - a[1] * b[0];
     }
+    det = c[0][0] * V[0][0] + c[0][1] * V[0][1] + c[0][2] * V[0][2];
     if (det == 0) return;
-    for (int i = 0; i < 3; i++) if (e[i] / det < 0) return;
-    port_log("[probe] tri hit (cimg %p w %u)\n", (void *)cimg.addr, cimg.width);
-    for (int i = 0; i < 3; i++)
-        port_log("[probe]   v%d scr %.2f %.2f z/w %.6f w %.2f rgba %.3f %.3f %.3f %.3f st %.2f %.2f\n", i, v[i]->x / v[i]->w,
-                 v[i]->y / v[i]->w, v[i]->z / v[i]->w, v[i]->w, v[i]->r, v[i]->g, v[i]->b, v[i]->a, v[i]->s, v[i]->t);
-    probe_state();
+    for (int k = 0; k < probe_n; k++) {
+        int in = 1;
+        for (int i = 0; i < 3 && in; i++) in = (c[i][0] * probe_pt[k][0] + c[i][1] * probe_pt[k][1] + c[i][2]) / det >= 0;
+        if (!in) continue;
+        port_log("[probe] (%d,%d) tri hit (cimg %p w %u)\n", (int)probe_pt[k][0], (int)probe_pt[k][1], (void *)cimg.addr, cimg.width);
+        for (int i = 0; i < 3; i++)
+            port_log("[probe]   v%d scr %.2f %.2f z/w %.6f w %.2f (x %.3f y %.3f z %.3f) rgba %.3f %.3f %.3f %.3f st %.2f %.2f\n", i,
+                     v[i]->x / v[i]->w, v[i]->y / v[i]->w, v[i]->z / v[i]->w, v[i]->w, v[i]->x, v[i]->y, v[i]->z, v[i]->r,
+                     v[i]->g, v[i]->b, v[i]->a, v[i]->s, v[i]->t);
+        probe_state();
+    }
 }
 static void probe_rect(float x0, float y0, float x1, float y1, float s, float t, float dsdx, float dtdy) {
-    if (probe_x < 0 || !gfx_log_ops || probe_x < x0 || probe_x >= x1 || probe_y < y0 || probe_y >= y1) return;
-    port_log("[probe] rect hit (cimg %p w %u) (%.2f,%.2f)-(%.2f,%.2f) st %.2f %.2f d %.4f %.4f\n", (void *)cimg.addr,
-             cimg.width, x0, y0, x1, y1, s, t, dsdx, dtdy);
-    probe_state();
+    if (!gfx_log_ops) return;
+    for (int k = 0; k < probe_n; k++) {
+        float px = probe_pt[k][0], py = probe_pt[k][1];
+        if (px < x0 || px >= x1 || py < y0 || py >= y1) continue;
+        port_log("[probe] (%d,%d) rect hit (cimg %p w %u) (%.2f,%.2f)-(%.2f,%.2f) st %.2f %.2f d %.4f %.4f\n", (int)px, (int)py,
+                 (void *)cimg.addr, cimg.width, x0, y0, x1, y1, s, t, dsdx, dtdy);
+        probe_state();
+    }
 }
 
 void rdp_tri(const GfxVtx *a, const GfxVtx *b, const GfxVtx *c) {
