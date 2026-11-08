@@ -41,6 +41,7 @@ void port_log(const char *fmt, ...) {
 #define REGION_PHYS 0x380000u    /* 8-wide detector region (like PokemonDetector_Regions) */
 #define SMALL_PHYS 0x390000u     /* 64-wide image with its own Z (like score.c) */
 #define SMALLZ_PHYS 0x398000u
+#define ZCOPY_PHYS 0x39A000u     /* score.c's "Z before": the Z image copied into a colour image */
 #define TEX_PHYS 0x200000u       /* textures, reached through segment 6 */
 #define L3DEX2_TEXT 0x0003FB30u  /* where the game's gspL3DEX2_fifoTextStart lives (physical) */
 
@@ -338,6 +339,14 @@ static void build_small(Gfx **pg) {
     vset(v, 0, 40, 200, 0, 0, 0, 0xFFFF00FF); vset(v, 1, 280, 200, 0, 0, 0, 0xFF8000FF); vset(v, 2, 160, 30, 0, 0, 0, 0xFFFFFFFF);
     gSPVertex(g++, v, 3, 0);
     gSP1Triangle(g++, 0, 1, 2, 0);
+    /* score.c: the Z image's upper half copied into a 64-wide colour image through a texture load, same task */
+    gDPPipeSync(g++);
+    gDPSetCycleType(g++, G_CYC_COPY);
+    gDPSetRenderMode(g++, G_RM_NOOP, G_RM_NOOP2);
+    gDPSetTexturePersp(g++, G_TP_NONE);
+    gDPLoadTextureBlock(g++, K0(SMALLZ_PHYS), G_IM_FMT_RGBA, G_IM_SIZ_16b, 64, 24, 0, G_TX_NOMIRROR | G_TX_WRAP, G_TX_NOMIRROR | G_TX_WRAP, G_TX_NOMASK, G_TX_NOMASK, G_TX_NOLOD, G_TX_NOLOD);
+    gDPSetColorImage(g++, G_IM_FMT_RGBA, G_IM_SIZ_16b, 64, K0(ZCOPY_PHYS));
+    gSPTextureRectangle(g++, 0, 0, 0x00FC, 0x005C, G_TX_RENDERTILE, 0, 0, 0x1000, 0x0400);
     /* back to the frame, copy the small image to (248, 184) */
     gDPPipeSync(g++);
     gSPViewport(g++, vp_mem);
@@ -409,6 +418,14 @@ unsigned char *gfx_test_run(void) {
     check("zbuffer", (ztest >> 11) < 8 && ((ztest >> 6) & 31) > 8, "overlap pixel %04X (green expected)", ztest);
     uint16_t small = fb_px(FB_PHYS, 320, 248 + 32, 184 + 20), smallbg = fb_px(FB_PHYS, 320, 249, 185);
     check("small_image_copy", (small >> 11) > 20 && smallbg == rgba16(0, 96, 0, 1), "copied pixel %04X background %04X", small, smallbg);
+    {   /* the 64x48 Z image was written back in the console's Z format at the end of the task (score.c reads it) */
+        uint16_t zin = fb_px(SMALLZ_PHYS, 64, 32, 20), zout = fb_px(SMALLZ_PHYS, 64, 1, 1);
+        int zsame = 0;
+        for (int y = 0; y < 24; y++)
+            for (int x = 0; x < 64; x++) zsame += fb_px(ZCOPY_PHYS, 64, x, y) == fb_px(SMALLZ_PHYS, 64, x, y);
+        check("z_writeback", zin == 0x2000 && zout == 0xFFFC && zsame == 64 * 24,
+              "triangle z %04X (2000 expected) clear %04X, copy equal %d/1536 (copy %04X %04X)", zin, zout, zsame, fb_px(ZCOPY_PHYS, 64, 32, 20), fb_px(ZCOPY_PHYS, 64, 1, 1));
+    }
     uint16_t ci = fb_px(FB_PHYS, 320, 246, 136), ciedge = fb_px(FB_PHYS, 320, 231, 121);
     check("ci4_tlut", ci != rgba16(16, 24, 64, 1) && ciedge == rgba16(16, 24, 64, 1), "centre %04X corner (transparent) %04X", ci, ciedge);
     uint16_t chk0 = fb_px(FB_PHYS, 320, 232, 50), chk1 = fb_px(FB_PHYS, 320, 242, 50);

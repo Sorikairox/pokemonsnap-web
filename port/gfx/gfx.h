@@ -38,6 +38,7 @@ void port_gfx_log_stats(void);                            /* log the counters si
 typedef struct {
     unsigned tasks, dls, cmds, tris, lines, rects, fills, draws, verts, tex_decodes, tex_hits, unknown_ops;
     unsigned resolves, resolve_px, uploads, upload_px, ucode_loads, bad_addr, culled, presents, fullsyncs;
+    unsigned zresolves, zresolve_px, zuploads, zclears;   /* Z images (S6) */
 } PortGfxStats;
 extern PortGfxStats port_gfx_stats;
 

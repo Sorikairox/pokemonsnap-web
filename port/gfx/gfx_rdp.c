@@ -14,7 +14,12 @@
  *       * port_gfx_inval_dcache (osInvalDCache) resolves the range for CPU reads;
  *       * an image whose rows are all resolved is "clean": RDRAM is authoritative again, and CPU writes into it (the
  *         detector's red dot) are uploaded before the next draw onto it or before it is shown (hash check).
- *   - FILL-mode rectangles into a Z image clear the GL depth buffer of the images that use that Z image. */
+ *   - Z images are GL depth textures, one per Z-image address and size, attached to whichever colour image is drawn
+ *     with them, and kept coherent with RDRAM the same way (S6: score.c counts the pixels of each Pokemon in
+ *     64x48 Z buffers and copies Z buffers through texture loads): written back in the console's 16-bit Z format
+ *     (18-bit z compressed to 3-bit exponent + 11-bit mantissa, dz 0) on texture loads, osInvalDCache and at the
+ *     end of each task (except Z images used with framebuffers); loaded from RDRAM when clean and RDRAM changed.
+ *     FILL rectangles into a Z image's rows clear its depth texture directly. */
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -55,8 +60,7 @@ typedef struct {
     int dirty_y0, dirty_y1;   /* rows drawn by the GPU and not yet resolved into RDRAM */
     int check_cpu;            /* clean, RDRAM may have been written by the CPU: compare with rdram_hash */
     uint32_t rdram_hash;
-    unsigned char *zkey;      /* Z image used with this target */
-    unsigned zgen;
+    unsigned zatt;            /* serial of the Z image attached to fbo (0 none) */
     unsigned last_use;
     int shown;                /* presented by the VI at least once: a framebuffer */
 } Target;
@@ -64,10 +68,24 @@ static Target targets[MAX_TARGETS];
 static Target *cur_target;
 static unsigned use_clock;
 
-typedef struct { unsigned char *addr; unsigned gen; float clear; } ZImg;
-static ZImg zimgs[8];
+#define MAX_ZIMGS 32
+typedef struct {
+    unsigned char *addr;
+    int width, height;
+    GLuint tex, fbo;          /* DEPTH_COMPONENT24 texture; a depth-only framebuffer for clears and uploads */
+    unsigned serial;
+    int dirty_y0, dirty_y1;   /* rows the GPU wrote and RDRAM does not hold yet */
+    int synced, check_cpu;    /* synced: the GL copy equals RDRAM (rdram_hash) when clean */
+    uint32_t rdram_hash;
+    int deferred;             /* used with a framebuffer: not written back at the end of each task */
+    unsigned last_use;
+} ZImg;
+static ZImg zimgs[MAX_ZIMGS];
+static unsigned zserial;
+static void zimg_resolve(ZImg *z, int y0, int y1);
 
 static void flush(void);
+
 
 static int bpp_of(int siz) { return siz == SIZ_32b ? 4 : 2; }
 static uint32_t hash_words(const unsigned char *p, uint32_t bytes) {
@@ -109,6 +127,10 @@ static void target_resolve(Target *t, int y0, int y1) {
             if (o == t || !o->addr) continue;
             const unsigned char *oe = o->addr + (size_t)o->width * o->height * bpp_of(o->siz);
             if (o->addr < e && a < oe) o->check_cpu = 1;
+        }
+        for (int i = 0; i < MAX_ZIMGS; i++) {
+            ZImg *z = &zimgs[i];
+            if (z->addr && z->addr < e && a < z->addr + (size_t)z->width * z->height * 2) z->check_cpu = 1;
         }
     }
     if (y0 <= t->dirty_y0 && y1 >= t->dirty_y1) {
@@ -158,7 +180,7 @@ static void target_sync_cpu(Target *t) {   /* a clean image: pick up CPU writes 
 static void target_free(Target *t) {
     if (t == cur_target) { flush(); cur_target = 0; }
     target_resolve(t, 0, t->height);
-    if (t->fbo) { glDeleteFramebuffers(1, &t->fbo); glDeleteTextures(1, &t->tex); glDeleteRenderbuffers(1, &t->depth); }
+    if (t->fbo) { glDeleteFramebuffers(1, &t->fbo); glDeleteTextures(1, &t->tex); }
     memset(t, 0, sizeof *t);
 }
 
@@ -200,35 +222,18 @@ static Target *target_get(unsigned char *addr, int width, int siz, int min_h) {
     glTexStorage2D(GL_TEXTURE_2D, 1, GL_RGBA8, width, h);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-    glGenRenderbuffers(1, &t->depth);
-    glBindRenderbuffer(GL_RENDERBUFFER, t->depth);
-    glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT24, width, h);
     glBindFramebuffer(GL_FRAMEBUFFER, t->fbo);
     glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, t->tex, 0);
-    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, t->depth);
     if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
         gfx_log_once(0xFB000000 | (unsigned)width, "framebuffer incomplete (%dx%d)", width, h);
-    glDisable(GL_SCISSOR_TEST);
-    glClearDepthf(1.0f);
-    glClear(GL_DEPTH_BUFFER_BIT);
     target_upload(t);   /* the image starts as RDRAM holds it */
     state_dirty = 1;
     return t;
 }
 
-static ZImg *zimg_get(unsigned char *addr) {
-    ZImg *free_slot = 0;
-    for (int i = 0; i < 8; i++) {
-        if (zimgs[i].addr == addr) return &zimgs[i];
-        if (!zimgs[i].addr && !free_slot) free_slot = &zimgs[i];
-    }
-    if (!free_slot) free_slot = &zimgs[(uintptr_t)addr % 8];
-    free_slot->addr = addr; free_slot->gen = 1; free_slot->clear = 1.0f;
-    return free_slot;
-}
-
-/* the RDRAM rows [p, p + n) are about to be read (texture load, CPU): resolve GPU-drawn images there */
-static void resolve_range(const unsigned char *p, uint32_t n) {
+/* the RDRAM rows [p, p + n) are about to be read (texture load, CPU, a Z image loading itself): resolve GPU-drawn
+ * colour and Z images there (except `skip`) */
+static void resolve_range_skip(const unsigned char *p, uint32_t n, const ZImg *skip) {
     for (int i = 0; i < MAX_TARGETS; i++) {
         Target *t = &targets[i];
         if (!t->addr || t->dirty_y1 <= t->dirty_y0) continue;
@@ -239,7 +244,18 @@ static void resolve_range(const unsigned char *p, uint32_t n) {
         int y1 = p + n < te ? (int)((p + n - t->addr + stride - 1) / stride) : t->height;
         target_resolve(t, y0, y1);
     }
+    for (int i = 0; i < MAX_ZIMGS; i++) {
+        ZImg *z = &zimgs[i];
+        if (z == skip || !z->addr || z->dirty_y1 <= z->dirty_y0) continue;
+        int stride = z->width * 2;
+        const unsigned char *ze = z->addr + (size_t)stride * z->height;
+        if (p >= ze || p + n <= z->addr) continue;
+        int y0 = p > z->addr ? (int)((p - z->addr) / stride) : 0;
+        int y1 = p + n < ze ? (int)((p + n - z->addr + stride - 1) / stride) : z->height;
+        zimg_resolve(z, y0, y1);
+    }
 }
+static void resolve_range(const unsigned char *p, uint32_t n) { resolve_range_skip(p, n, 0); }
 
 void port_gfx_inval_dcache(const void *p, uint32_t len) {
     if (gl_ok != 1) return;
@@ -254,10 +270,17 @@ void port_gfx_writeback_dcache(const void *p, uint32_t len) {
         const unsigned char *te = t->addr + (size_t)t->width * t->height * bpp_of(t->siz);
         if (!len || (a < te && a + len > t->addr)) t->check_cpu = 1;
     }
+    for (int i = 0; i < MAX_ZIMGS; i++) {
+        ZImg *z = &zimgs[i];
+        if (!z->addr) continue;
+        const unsigned char *ze = z->addr + (size_t)z->width * z->height * 2;
+        if (!len || (a < ze && a + len > z->addr)) z->check_cpu = 1;
+    }
 }
 void port_gfx_resolve_all(void) {
     if (gl_ok != 1) return;
     for (int i = 0; i < MAX_TARGETS; i++) if (targets[i].addr) target_resolve(&targets[i], 0, targets[i].height);
+    for (int i = 0; i < MAX_ZIMGS; i++) if (zimgs[i].addr) zimg_resolve(&zimgs[i], 0, zimgs[i].height);
 }
 
 /* ------------------------------------------------------------------ TMEM loads */
@@ -513,7 +536,7 @@ static char *gen_frag(uint32_t w0, uint32_t w1, uint32_t oml, uint32_t flags) {
     else if (cyc == CYC_COPY) {
         P(" oCol = t0;\n");
         if (((flags >> PF_ACMP_SFT) & 3) == 1) P(" if (oCol.a < 0.5) discard;\n");   /* copy mode compares texel alpha */
-        P(" oCol.a = 1.0;\n}\n");
+        P("}\n");   /* the texel is copied whole: RGBA16 keeps its alpha (coverage) bit, as score.c's Z copies need */
     } else {
         unsigned sel[2][8] = {
             {(w0 >> 20) & 15, (w1 >> 28) & 15, (w0 >> 15) & 31, (w1 >> 15) & 7, (w0 >> 12) & 7, (w1 >> 12) & 7, (w0 >> 9) & 7, (w1 >> 9) & 7},
@@ -648,10 +671,272 @@ static void set_rgba(GLint u, uint32_t c) {
     glUniform4f(u, (c >> 24) / 255.0f, ((c >> 16) & 0xFF) / 255.0f, ((c >> 8) & 0xFF) / 255.0f, (c & 0xFF) / 255.0f);
 }
 
+/* ------------------------------------------------------------------ Z images (S6) */
+/* The console's 16-bit Z: an 18-bit z (GL depth * 0x3FFFF: both are linear in NDC z) compressed to a 3-bit exponent
+ * (leading ones of z) and an 11-bit mantissa, << 2, dz = 0. 0xFFFC (the usual clear) is z 0x3FFFF = depth 1.0. */
+static const unsigned zfmt_shift[8] = {6, 5, 4, 3, 2, 1, 0, 0};
+static const unsigned zfmt_base[8] = {0, 0x20000, 0x30000, 0x38000, 0x3C000, 0x3E000, 0x3F000, 0x3F800};
+static float z16_depth(unsigned v) {
+    unsigned e = (v >> 13) & 7, m = (v >> 2) & 0x7FF;
+    return (float)(zfmt_base[e] + (m << zfmt_shift[e])) / 262143.0f;
+}
+static const char *zpass_vert =
+    "#version 300 es\nvoid main() { gl_Position = vec4(float((gl_VertexID & 1) << 2) - 1.0, "
+    "float((gl_VertexID & 2) << 1) - 1.0, 0.0, 1.0); }\n";
+static const char *zenc_frag =
+    "#version 300 es\nprecision highp float;\nprecision highp int;\nuniform highp sampler2D uDepth;\nuniform int uY0;\n"
+    "out vec4 o;\nvoid main() {\n"
+    " float d = texelFetch(uDepth, ivec2(int(gl_FragCoord.x), int(gl_FragCoord.y) + uY0), 0).r;\n"
+    " uint z = min(uint(clamp(d, 0.0, 1.0) * 262143.0 + 0.5), 262143u);\n"
+    " uint e, m;\n"
+    " if (z < 0x20000u) { e = 0u; m = z >> 6; }\n"
+    " else if (z < 0x30000u) { e = 1u; m = (z >> 5) & 0x7FFu; }\n"
+    " else if (z < 0x38000u) { e = 2u; m = (z >> 4) & 0x7FFu; }\n"
+    " else if (z < 0x3C000u) { e = 3u; m = (z >> 3) & 0x7FFu; }\n"
+    " else if (z < 0x3E000u) { e = 4u; m = (z >> 2) & 0x7FFu; }\n"
+    " else if (z < 0x3F000u) { e = 5u; m = (z >> 1) & 0x7FFu; }\n"
+    " else if (z < 0x3F800u) { e = 6u; m = z & 0x7FFu; }\n"
+    " else { e = 7u; m = z & 0x7FFu; }\n"
+    " uint v = (e << 13) | (m << 2);\n"
+    " o = vec4(float(v >> 8) / 255.0, float(v & 255u) / 255.0, 0.0, 1.0);\n}\n";
+static const char *zdec_frag =
+    "#version 300 es\nprecision highp float;\nuniform highp sampler2D uZ;\n"
+    "void main() { gl_FragDepth = texelFetch(uZ, ivec2(gl_FragCoord.xy), 0).r; }\n";
+static GLuint zenc_prog, zdec_prog, zpass_vao, zenc_fbo, zenc_tex, zdec_tex;
+static GLint zenc_u_y0;
+static int zenc_w, zenc_h;
+
+static GLuint zpass_link(const char *frag) {
+    GLuint p = glCreateProgram(), vs = compile(GL_VERTEX_SHADER, zpass_vert), fs = compile(GL_FRAGMENT_SHADER, frag);
+    glAttachShader(p, vs);
+    glAttachShader(p, fs);
+    glLinkProgram(p);
+    glDeleteShader(vs);
+    glDeleteShader(fs);
+    GLint ok = 0;
+    glGetProgramiv(p, GL_LINK_STATUS, &ok);
+    if (!ok) port_log("[gfx] Z program link failed\n");
+    return p;
+}
+static void zpass_init(void) {
+    if (zenc_prog) return;
+    zenc_prog = zpass_link(zenc_frag);
+    zdec_prog = zpass_link(zdec_frag);
+    glUseProgram(zenc_prog);
+    glUniform1i(glGetUniformLocation(zenc_prog, "uDepth"), 0);
+    zenc_u_y0 = glGetUniformLocation(zenc_prog, "uY0");
+    glUseProgram(zdec_prog);
+    glUniform1i(glGetUniformLocation(zdec_prog, "uZ"), 0);
+    glGenVertexArrays(1, &zpass_vao);
+    cur_prog = 0;
+}
+/* GL state a Z pass leaves behind is reset by the next begin_batch (state_dirty) */
+static void zpass_state(int w, int h) {
+    glViewport(0, 0, w, h);
+    glDisable(GL_SCISSOR_TEST);
+    glDisable(GL_BLEND);
+    glDisable(GL_POLYGON_OFFSET_FILL);
+    glBindVertexArray(zpass_vao);
+    glActiveTexture(GL_TEXTURE0);
+    state_dirty = 1;
+    cur_prog = 0;
+}
+
+static void zimg_free(ZImg *z) {
+    zimg_resolve(z, 0, z->height);
+    if (z->tex) { glDeleteFramebuffers(1, &z->fbo); glDeleteTextures(1, &z->tex); }
+    memset(z, 0, sizeof *z);
+}
+
+/* GPU -> RDRAM: rows [y0, y1) of the dirty rows, in the console's Z format */
+static void zimg_resolve(ZImg *z, int y0, int y1) {
+    if (!z->tex || z->dirty_y1 <= z->dirty_y0) return;
+    if (y0 < z->dirty_y0) y0 = z->dirty_y0;
+    if (y1 > z->dirty_y1) y1 = z->dirty_y1;
+    if (y1 <= y0) return;
+    flush();
+    zpass_init();
+    int w = z->width, n = y1 - y0;
+    if (w > zenc_w || n > zenc_h) {
+        if (zenc_tex) { glDeleteFramebuffers(1, &zenc_fbo); glDeleteTextures(1, &zenc_tex); }
+        if (w > zenc_w) zenc_w = w;
+        if (n > zenc_h) zenc_h = n;
+        glGenTextures(1, &zenc_tex);
+        glBindTexture(GL_TEXTURE_2D, zenc_tex);
+        glTexStorage2D(GL_TEXTURE_2D, 1, GL_RGBA8, zenc_w, zenc_h);
+        glBindTexture(GL_TEXTURE_2D, 0);
+        glGenFramebuffers(1, &zenc_fbo);
+        glBindFramebuffer(GL_FRAMEBUFFER, zenc_fbo);
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, zenc_tex, 0);
+    }
+    unsigned char *px = malloc((size_t)w * n * 4);
+    if (!px) return;
+    glBindFramebuffer(GL_FRAMEBUFFER, zenc_fbo);
+    zpass_state(w, n);
+    glDisable(GL_DEPTH_TEST);
+    glDepthMask(GL_FALSE);
+    glUseProgram(zenc_prog);
+    glUniform1i(zenc_u_y0, y0);
+    glBindTexture(GL_TEXTURE_2D, z->tex);
+    glDrawArrays(GL_TRIANGLES, 0, 3);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    glPixelStorei(GL_PACK_ALIGNMENT, 1);
+    glReadPixels(0, 0, w, n, GL_RGBA, GL_UNSIGNED_BYTE, px);
+    for (int y = 0; y < n; y++) {
+        unsigned char *row = z->addr + (size_t)(y0 + y) * w * 2;
+        const unsigned char *s = px + (size_t)y * w * 4;
+        for (int x = 0; x < w; x++, s += 4) vbe_st16(row + 2 * x, (unsigned)s[0] << 8 | s[1]);
+    }
+    free(px);
+    port_gfx_stats.zresolves++;
+    port_gfx_stats.zresolve_px += (unsigned)(w * n);
+    {   /* images over these bytes may now be stale (checked when clean) */
+        const unsigned char *a = z->addr + (size_t)y0 * w * 2, *e = z->addr + (size_t)y1 * w * 2;
+        for (int i = 0; i < MAX_TARGETS; i++) {
+            Target *o = &targets[i];
+            if (o->addr && o->addr < e && a < o->addr + (size_t)o->width * o->height * bpp_of(o->siz)) o->check_cpu = 1;
+        }
+        for (int i = 0; i < MAX_ZIMGS; i++) {
+            ZImg *o = &zimgs[i];
+            if (o != z && o->addr && o->addr < e && a < o->addr + (size_t)o->width * o->height * 2) o->check_cpu = 1;
+        }
+    }
+    if (y0 <= z->dirty_y0 && y1 >= z->dirty_y1) {
+        z->dirty_y0 = z->dirty_y1 = 0;
+        if (z->synced) z->rdram_hash = hash_words(z->addr, (uint32_t)(z->width * z->height * 2));
+    } else if (y0 <= z->dirty_y0) z->dirty_y0 = y1;
+    else if (y1 >= z->dirty_y1) z->dirty_y1 = y0;
+}
+
+/* RDRAM -> GL (the Z image is clean) */
+static void zimg_upload(ZImg *z) {
+    int w = z->width, h = z->height;
+    float *d = malloc((size_t)w * h * sizeof(float));
+    if (!d) return;
+    int same = 1;
+    for (int y = 0; y < h; y++)
+        for (int x = 0; x < w; x++) {
+            float v = z16_depth(vbe_ld16(z->addr + ((size_t)y * w + x) * 2));
+            d[(size_t)y * w + x] = v;
+            if (v != d[0]) same = 0;
+        }
+    flush();
+    zpass_init();
+    glBindFramebuffer(GL_FRAMEBUFFER, z->fbo);
+    zpass_state(w, h);
+    glDepthMask(GL_TRUE);
+    if (same) {
+        glClearDepthf(d[0]);
+        glClear(GL_DEPTH_BUFFER_BIT);
+    } else {
+        if (!zdec_tex) glGenTextures(1, &zdec_tex);
+        glBindTexture(GL_TEXTURE_2D, zdec_tex);
+        glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_R32F, w, h, 0, GL_RED, GL_FLOAT, d);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        glEnable(GL_DEPTH_TEST);
+        glDepthFunc(GL_ALWAYS);
+        glUseProgram(zdec_prog);
+        glDrawArrays(GL_TRIANGLES, 0, 3);
+        glBindTexture(GL_TEXTURE_2D, 0);
+        glDisable(GL_DEPTH_TEST);
+    }
+    free(d);
+    z->rdram_hash = hash_words(z->addr, (uint32_t)(w * h * 2));
+    z->synced = 1;
+    z->check_cpu = 0;
+    port_gfx_stats.zuploads++;
+}
+
+/* before the GPU uses a clean Z image: pick up what other images or the CPU wrote into its bytes */
+static void zimg_sync(ZImg *z) {
+    if (z->dirty_y1 > z->dirty_y0) return;   /* the GPU copy is newer than RDRAM */
+    if (z->synced && !z->check_cpu) return;
+    uint32_t bytes = (uint32_t)(z->width * z->height * 2);
+    resolve_range_skip(z->addr, bytes, z);
+    if (!z->synced || hash_words(z->addr, bytes) != z->rdram_hash) zimg_upload(z);
+    z->check_cpu = 0;
+}
+
+static ZImg *zimg_get(unsigned char *addr, int width, int height) {
+    ZImg *slot = 0, *lru = 0;
+    for (int i = 0; i < MAX_ZIMGS; i++) {
+        ZImg *z = &zimgs[i];
+        if (z->addr == addr && z->width == width && z->height == height) { z->last_use = ++use_clock; return z; }
+    }
+    for (int i = 0; i < MAX_ZIMGS; i++) {
+        ZImg *z = &zimgs[i];
+        if (z->addr == addr) zimg_free(z);   /* the same address with another size: written back, replaced */
+        if (!z->addr) { if (!slot) slot = z; continue; }
+        if (!lru || z->last_use < lru->last_use) lru = z;
+    }
+    if (!slot) { zimg_free(lru); slot = lru; }
+    ZImg *z = slot;
+    while (height > 1 && !in_memory(addr, (size_t)width * height * 2)) height--;
+    z->addr = addr; z->width = width; z->height = height; z->serial = ++zserial; z->last_use = ++use_clock;
+    glGenTextures(1, &z->tex);
+    glBindTexture(GL_TEXTURE_2D, z->tex);
+    glTexStorage2D(GL_TEXTURE_2D, 1, GL_DEPTH_COMPONENT24, width, height);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_COMPARE_MODE, GL_NONE);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    glGenFramebuffers(1, &z->fbo);
+    glBindFramebuffer(GL_FRAMEBUFFER, z->fbo);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, z->tex, 0);
+    {
+        GLenum none = GL_NONE;
+        glDrawBuffers(1, &none);
+        glReadBuffer(GL_NONE);
+    }
+    if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
+        gfx_log_once(0xFA000000 | (unsigned)width, "Z framebuffer incomplete (%dx%d)", width, height);
+    state_dirty = 1;
+    return z;
+}
+
+/* a FILL rectangle over the Z image's rows [y0, y1), columns [x0, x1): its depth texture is cleared */
+static void zimg_clear(ZImg *z, int x0, int y0, int x1, int y1, float depth) {
+    zimg_sync(z);   /* rows outside the rectangle must hold RDRAM's values when the image becomes dirty */
+    flush();
+    glBindFramebuffer(GL_FRAMEBUFFER, z->fbo);
+    glEnable(GL_SCISSOR_TEST);
+    glScissor(x0, y0, x1 - x0, y1 - y0);
+    glDepthMask(GL_TRUE);
+    glClearDepthf(depth);
+    glClear(GL_DEPTH_BUFFER_BIT);
+    state_dirty = 1;
+    if (z->dirty_y1 <= z->dirty_y0) { z->dirty_y0 = y0; z->dirty_y1 = y1; }
+    else { if (y0 < z->dirty_y0) z->dirty_y0 = y0; if (y1 > z->dirty_y1) z->dirty_y1 = y1; }
+    port_gfx_stats.zclears++;
+}
+
+/* a FILL rectangle into colour image rows [y0, y1) that are (wholly or partly) Z images of the same width: those
+ * rows are cleared in the Z images. Returns 1 when every row of the rectangle was a Z image's (no colour to draw). */
+static int fill_zimgs(int x0, int y0, int x1, int y1) {
+    int stride = (int)cimg.width * 2, n = y1 - y0, left = n;
+    static unsigned char cov[1024];
+    if (n <= 0 || n > 1024) return 0;
+    memset(cov, 0, (size_t)n);
+    float depth = z16_depth(fill_color >> 16);
+    for (int i = 0; i < MAX_ZIMGS; i++) {
+        ZImg *z = &zimgs[i];
+        if (!z->addr || z->width != (int)cimg.width) continue;
+        ptrdiff_t off = z->addr - cimg.addr;
+        if (off % stride) continue;
+        int d = (int)(off / stride), a = y0 > d ? y0 : d, b = y1 < d + z->height ? y1 : d + z->height;
+        if (a >= b) continue;
+        zimg_clear(z, x0, a - d, x1, b - d, depth);
+        for (int r = a; r < b; r++) if (!cov[r - y0]) { cov[r - y0] = 1; left--; }
+    }
+    return left == 0;
+}
+
 /* per-batch state: what the current batch was set up with */
 static struct { int kind, tex0_tile, tex1_tile; uint32_t geom; int tex_on; } batch_key;
 static float cur_tex_w[2] = {1, 1}, cur_tex_h[2] = {1, 1};
-static int cur_ztest;
+static ZImg *cur_zw;   /* the Z image the current batch writes (0 none) */
 static int sc_row0, sc_row1;   /* scissor rows of the current batch (clamped to the target) */
 
 /* rows [y0, y1) (N64 pixels, clamped to the scissor) are drawn by the GPU: they are dirty until written back */
@@ -663,6 +948,13 @@ static void mark_rows(float fy0, float fy1) {
     if (y1 <= y0) return;
     if (t->dirty_y1 <= t->dirty_y0) { t->dirty_y0 = y0; t->dirty_y1 = y1; }
     else { if (y0 < t->dirty_y0) t->dirty_y0 = y0; if (y1 > t->dirty_y1) t->dirty_y1 = y1; }
+    ZImg *z = cur_zw;
+    if (z) {
+        if (y1 > z->height) y1 = z->height;
+        if (y1 <= y0) return;
+        if (z->dirty_y1 <= z->dirty_y0) { z->dirty_y0 = y0; z->dirty_y1 = y1; }
+        else { if (y0 < z->dirty_y0) z->dirty_y0 = y0; if (y1 > z->dirty_y1) z->dirty_y1 = y1; }
+    }
 }
 
 /* kind: 0 triangles, 1 rectangle (1/2-cycle), 2 copy rect, 3 fill rect (1/2-cycle draws use 1) */
@@ -682,7 +974,22 @@ static int begin_batch(int kind, int tile) {
     Target *t = target_get(cimg.addr, (int)cimg.width, (int)cimg.siz, need_h);
     if (t->dirty_y1 <= t->dirty_y0 && t->check_cpu) target_sync_cpu(t);
     if (t != cur_target) { cur_target = t; }
+    /* depth: the Z image (a depth texture of the target's size) is brought up to date and attached */
+    int zs_prim = (om_l & OML_ZS_PRIM) != 0;
+    int ztest = cyc < CYC_COPY && (om_l & OML_Z_CMP) && zimg && (kind == 0 ? (gfx_geom & GM_ZBUFFER) != 0 : zs_prim);
+    int zwrite = cyc < CYC_COPY && (om_l & OML_Z_UPD) && zimg && (kind == 0 ? (gfx_geom & GM_ZBUFFER) != 0 : zs_prim);
+    ZImg *z = 0;
+    if (ztest || zwrite) {
+        z = zimg_get(zimg, t->width, t->height);
+        zimg_sync(z);
+        if (t->shown) z->deferred = 1;
+    }
+    cur_zw = zwrite ? z : 0;
     glBindFramebuffer(GL_FRAMEBUFFER, t->fbo);
+    if (z && t->zatt != z->serial) {
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, z->tex, 0);
+        t->zatt = z->serial;
+    }
     glViewport(0, 0, t->width, t->height);
     int x0 = (int)floorf(sc_x0), y0 = (int)floorf(sc_y0), x1 = (int)ceilf(sc_x1), y1 = (int)ceilf(sc_y1);
     if (x1 > t->width) x1 = t->width;
@@ -692,22 +999,6 @@ static int begin_batch(int kind, int tile) {
     glEnable(GL_SCISSOR_TEST);
     glScissor(x0, y0, x1 - x0, y1 - y0);
     sc_row0 = y0; sc_row1 = y1;
-    /* depth */
-    int zs_prim = (om_l & OML_ZS_PRIM) != 0;
-    int ztest = cyc < CYC_COPY && (om_l & OML_Z_CMP) && zimg && (kind == 0 ? (gfx_geom & GM_ZBUFFER) != 0 : zs_prim);
-    int zwrite = cyc < CYC_COPY && (om_l & OML_Z_UPD) && zimg && (kind == 0 ? (gfx_geom & GM_ZBUFFER) != 0 : zs_prim);
-    if ((ztest || zwrite) && zimg) {
-        ZImg *z = zimg_get(zimg);
-        if (t->zkey != zimg || t->zgen != z->gen) {
-            glDisable(GL_SCISSOR_TEST);
-            glDepthMask(GL_TRUE);
-            glClearDepthf(z->clear);
-            glClear(GL_DEPTH_BUFFER_BIT);
-            glEnable(GL_SCISSOR_TEST);
-            t->zkey = zimg; t->zgen = z->gen;
-        }
-    }
-    cur_ztest = ztest;
     if (ztest || zwrite) {
         glEnable(GL_DEPTH_TEST);
         glDepthFunc(ztest ? GL_LEQUAL : GL_ALWAYS);
@@ -852,24 +1143,15 @@ static void fill_rect(uint32_t w0, uint32_t w1) {
     float lrx = ((w0 >> 12) & 0xFFF) / 4.0f, lry = (w0 & 0xFFF) / 4.0f;
     float ulx = ((w1 >> 12) & 0xFFF) / 4.0f, uly = (w1 & 0xFFF) / 4.0f;
     if (cyc >= CYC_COPY) { lrx = floorf(lrx) + 1; lry = floorf(lry) + 1; }
-    if (cyc == CYC_FILL && cimg.addr) {
-        /* a fill into a Z image: the depth buffers that use it are cleared (to its value) when next bound. The
-         * 16-bit Z format (compressed 14-bit z + dz) is approximated linearly: 0xFFFC (the usual clear) = far. */
-        if (cimg.addr == zimg) zimg_get(zimg);
-        int was_z = 0;
-        for (int i = 0; i < 8; i++)
-            if (zimgs[i].addr && zimgs[i].addr == cimg.addr) {
-                unsigned z = (fill_color >> 18) & 0x3FFF;
-                zimgs[i].gen++;
-                zimgs[i].clear = z >= 0x3FFF ? 1.0f : z / 16383.0f;
-                was_z = 1;
-            }
-        if (was_z && cimg.addr == zimg) return;   /* the current Z image: no colour pixels to keep */
-    }
     if (lrx <= ulx || lry <= uly) return;
     /* clip to the scissor */
     float x0 = ulx > sc_x0 ? ulx : sc_x0, y0 = uly > sc_y0 ? uly : sc_y0, x1 = lrx < sc_x1 ? lrx : sc_x1, y1 = lry < sc_y1 ? lry : sc_y1;
     if (x1 <= x0 || y1 <= y0) return;
+    /* a fill into Z images' rows (render.c and score.c clear Z buffers as 16-bit colour images): their depth
+     * textures are cleared; rows that belong to no known Z image are drawn as colour */
+    if (cyc == CYC_FILL && cimg.addr && cimg.siz == SIZ_16b && gl_ok == 1 &&
+        fill_zimgs((int)floorf(x0), (int)floorf(y0), (int)ceilf(x1), (int)ceilf(y1)))
+        return;
     if (!begin_batch(cyc == CYC_FILL ? 3 : 1, 0)) return;
     quad(x0, y0, x1, y1, 0, 0, 0, 0, 0);
 }
@@ -878,6 +1160,7 @@ static void fill_rect(uint32_t w0, uint32_t w1) {
 void rdp_reset_task(void) {
     state_dirty = 1;
     cur_target = 0;
+    cur_zw = 0;
 }
 void rdp_end_task(void) {
     if (gl_ok != 1) return;
@@ -888,6 +1171,11 @@ void rdp_end_task(void) {
     for (int i = 0; i < MAX_TARGETS; i++) {
         Target *t = &targets[i];
         if (t->addr && !t->shown) target_resolve(t, 0, t->height);
+    }
+    /* Z images too (score.c counts Pokemon pixels in its Z buffers with the CPU), except those of framebuffers */
+    for (int i = 0; i < MAX_ZIMGS; i++) {
+        ZImg *z = &zimgs[i];
+        if (z->addr && !z->deferred) zimg_resolve(z, 0, z->height);
     }
 }
 
