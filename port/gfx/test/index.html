@@ -1,0 +1,31 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>port/gfx test</title>
+<style>body{background:#222;color:#ddd;font:12px monospace;margin:8px} canvas,img{image-rendering:pixelated;border:1px solid #555;margin:2px}</style>
+<canvas id="gl" width="640" height="480"></canvas>
+<img id="rdram" width="640" height="480">
+<pre id="log"></pre>
+<textarea id="png_shown" style="display:none"></textarea>
+<textarea id="png_rdram" style="display:none"></textarea>
+<textarea id="png_shown2" style="display:none"></textarea>
+<textarea id="png_rdram2" style="display:none"></textarea>
+<script>
+const logEl = document.getElementById('log');
+const canvas = document.getElementById('gl').transferControlToOffscreen();
+const w = new Worker('worker.js');
+const toUrl = (b) => new Promise((r) => { const f = new FileReader(); f.onload = () => r(f.result); f.readAsDataURL(b); });
+w.onmessage = async (e) => {
+  if (e.data.type === 'log') logEl.textContent += e.data.text + '\n';
+  if (e.data.type === 'done') {
+    document.getElementById('png_shown').textContent = await toUrl(e.data.shown);
+    const u = await toUrl(e.data.rdram);
+    document.getElementById('png_rdram').textContent = u;
+    document.getElementById('rdram').src = u;
+    document.getElementById('png_shown2').textContent = await toUrl(e.data.shown2);
+    document.getElementById('png_rdram2').textContent = await toUrl(e.data.rdram2);
+    document.title = 'DONE';
+  }
+};
+w.onerror = (e) => { logEl.textContent += 'worker error: ' + e.message + '\n'; };
+w.postMessage({ canvas }, [canvas]);
+</script>
