@@ -533,6 +533,71 @@ def fptr_eq(text, st):
     return text
 
 
+# S5: the console's bss layout of a TU. The decomp declares some objects smaller than the game uses them and keeps
+# the console addresses with unreferenced filler symbols after them: player.c `struct DObjDynamicStore
+# PlayerMatrixStore; // size 0x38` (4 bytes + VLA; the player's DObj writes 0x34 bytes of matrix data into it) is
+# followed by `u8 D_803AE4A5_54E8B5; u16 D_803AE4A6_54E8B6; u8 D_803AE4A8_54E8B8[0x30];`. On the console the overflow
+# lands in that filler; in wasm clang placed IsTutorialEnabled and MainCameraBorder* there, the borders became huge and
+# every main-camera scissor was empty (the Beach went black once the player moved). Every zero-initialised global
+# that the matching build puts in a bss section is therefore laid out at its console offset inside one byte array
+# per console section (`@__bss.<tu>.<section>`, 16-aligned at a 16-aligned console address, so vbe's a ^ 3 / a ^ 2
+# sub-word addressing matches the mirror's) and the global becomes an alias of its place. Overflows then reach the
+# same neighbours as on the console. Initialised data keeps its own globals.
+GDEF = re.compile(r'^(@[\w.$-]+) = ((?:(?:internal|private|dso_local|hidden|common|unnamed_addr|local_unnamed_addr) )*)'
+                  r'global (.+?)((?:, section "[^"]*")?), align (\d+)$')
+
+
+def zero_init(t):
+    """`T init` of a global definition: True if the initialiser is all zeros"""
+    if '@' in t:
+        return False
+    t = re.sub(r'\[\d+ x ', '[', t)
+    t = re.sub(r'\bi\d+\b', '', t)
+    t = re.sub(r'%[\w.$-]+', '', t)
+    return not re.search(r'(?<![\w.])-?\d*[1-9]\d*(?:\.\d+)?(?:e[+-]?\d+)?\b', t.replace('0.000000e+00', '0'))
+
+
+def bss_layout(text, rows, tag, st):
+    lines = text.split('\n')
+    where = {}
+    for i, l in enumerate(lines):
+        if l.startswith('@') and ' global ' in l:
+            m = GDEF.match(l)
+            if m:
+                where[m[1]] = (i, m)
+    groups = collections.defaultdict(list)
+    for name, vram, size, sec in rows:
+        w = where.get('@' + name)
+        if not w:
+            continue
+        i, m = w
+        if 'external' in m[2] or not zero_init(m[3]):
+            continue
+        groups[sec].append((int(vram, 16), int(size, 16), '@' + name, i, m))
+    out_defs = []
+    for sec, mem in sorted(groups.items()):
+        base = min(v for v, *_ in mem) & ~15
+        end = max(v + s for v, s, *_ in mem)
+        n = ((end - base + 3) & ~3) + 16
+        blob = f'@__bss.{tag}.{re.sub(r"[^A-Za-z0-9_]", "_", sec)}'
+        secattr = mem[0][4][4]
+        out_defs.append(f'{blob} = internal global [{n} x i8] zeroinitializer{secattr}, align 16')
+        for v, s, name, i, m in mem:
+            link = [t for t in m[2].split() if t in ('internal', 'private', 'dso_local', 'hidden')]
+            ty = m[3][:m[3].rfind(' ')].strip() if not m[3].rstrip().endswith(('}>', '}', ']', '>')) else None
+            if ty is None:   # a padded aggregate initialiser <{ i8 0, [3 x i8] zeroinitializer }>: type up to its value
+                d, k = 0, 0
+                for k, c in enumerate(m[3]):
+                    d += c in '<{[('
+                    d -= c in '>}])'
+                    if d == 0 and c in '>}]' and k:
+                        break
+                ty = m[3][:k + 1]
+            lines[i] = f'{name} = {" ".join(link) + " " if link else ""}alias {ty}, getelementptr (i8, ptr {blob}, i32 {v - base})'
+            st['bss_layout'] = st.get('bss_layout', 0) + 1
+    return '\n'.join(lines + out_defs) + '\n'
+
+
 # RCP / PI / SI register accesses through a constant KSEG1 address (rcp.h IO_READ / IO_WRITE in game C) are not
 # memory on the PC. Constant
 # 32-bit loads/stores in 0xA4000000..0xA4FFFFFF become calls to the PC register model
@@ -632,6 +697,10 @@ def main():
             n, v, s = l.split()
             vrams['@' + n] = (int(v, 16), int(s))
     text = icall.epilogue(p.run(), need, regs, vrams)
+    # S5: console bss layout (bss_layout below)
+    if fvf != '-' and os.path.exists(fvf[:-4] + '.bss'):
+        text = bss_layout(text, [l.split() for l in open(fvf[:-4] + '.bss') if l.strip()],
+                          os.path.basename(src)[:-3], p.st)
     # S3a: writable globals of an overlay TU go to the wasm data section ovl_<segment>, so that the PC layer can reset
     # them when the game loads the overlay again (pc_mem.c port_dma_loaded; __start_/__stop_ symbols)
     sec = sys.argv[6] if len(sys.argv) > 6 else '-'

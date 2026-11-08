@@ -339,10 +339,15 @@ def tu_meta(rows):
     segs = [r[0] for r in tsv(f'{SYM}/segments.tsv') if r[2] not in ('-', '')]  # = port_segments order
     sidx = {s: i for i, s in enumerate(segs)}
     funcs = collections.defaultdict(list)
+    bss = collections.defaultdict(list)
     for r in tsv(f'{SYM}/symbols.tsv'):
         name, vram, rom, size, typ, bind, sec, seg, obj = r
         if typ == 'func' and seg in sidx and obj.startswith('build/'):
             funcs[src_of(obj)].append(f'{name} {vram} {sidx[seg]}\n')
+        # S5: the TU's console bss layout (vbe.py bss_layout keeps it: objects that overflow into the next one on the
+        # console, like player.c's PlayerMatrixStore, must overflow into the same neighbours here)
+        if typ in ('data', 'none') and 'bss' in sec and obj.startswith('build/') and re.match(r'^[0-9A-Fa-f]+$', size):
+            bss[src_of(obj)].append(f'{name} {vram} {size} {sec}\n')
     os.makedirs(FVRAM, exist_ok=True)
     meta = {}
     for src, seg, cat, action, nf, secs in rows:
@@ -350,6 +355,7 @@ def tu_meta(rows):
             continue
         fv = f'{FVRAM}/{tag_of(src)}.txt'
         write_if_changed(fv, ''.join(sorted(funcs.get(src, []))))
+        write_if_changed(f'{FVRAM}/{tag_of(src)}.bss', ''.join(sorted(bss.get(src, []))))
         sec = f'ovl_{seg}' if seg in sidx and seg != 'main' and re.match(r'^[A-Za-z_]\w*$', seg) else '-'
         meta[src] = (fv, sec)
     return meta
@@ -360,7 +366,7 @@ def build_obj(src, sig_hash, abs_hash, meta):
     ll, vll, obj, kf = f'{LL}/{tag}.ll', f'{LL}/{tag}.v.ll', f'{VOBJ}/{tag}.o', f'{VOBJ}/{tag}.key'
     fv, sec = meta[src]
     k = key([(jload(f'{LL}/{tag}.key') or {}).get('key', 'none'), sig_hash, abs_hash, ' '.join(O1_FLAGS), sec],
-            TOOLS + [fv])
+            TOOLS + [fv, fv[:-4] + '.bss'])
     old = jload(kf)
     if old and old['key'] == k and os.path.exists(obj):
         return src, 0, old['stats'], False
