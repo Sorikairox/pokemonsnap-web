@@ -2129,6 +2129,8 @@ async function createWasm() {
 
   var _rtw_log = (p, n) => Module['rtw']['rtw_log'](p, n);
 
+  var _rtw_option_changed = (id, value) => Module['rtw']['rtw_option_changed'](id, value);
+
   var _rtw_rumble = (port, on) => Module['rtw']['rtw_rumble'](port, on);
 
 for (let i = 0; i < 32; ++i) tempFixedLengthArray.push(new Array(i));;
@@ -2167,8 +2169,10 @@ if (Module['wasmBinary']) wasmBinary = Module['wasmBinary'];
 
 
 // Imports from the Wasm binary.
-var _free,
+var _port_option_get,
+  _free,
   _malloc,
+  _port_option_set,
   _port_thread_dump,
   _port_set_pad,
   _port_vi_retrace,
@@ -2191,6 +2195,7 @@ var _free,
   _rtw_save_load,
   _rtw_start,
   _rtw_input,
+  _rtw_option,
   _rtw_pause,
   _rtw_resize,
   _port_rtw_retrace,
@@ -2261,6 +2266,7 @@ var _free,
   dynCall_ffffff,
   dynCall_vifiii,
   dynCall_viiiif,
+  dynCall_viiiiiiii,
   dynCall_fffffff,
   dynCall_iiiiiiiiiii,
   dynCall_vifffii,
@@ -2318,8 +2324,10 @@ var _free,
 
 
 function assignWasmExports(wasmExports) {
+  Module['_port_option_get'] = _port_option_get = wasmExports['port_option_get'];
   _free = wasmExports['free'];
   _malloc = wasmExports['malloc'];
+  Module['_port_option_set'] = _port_option_set = wasmExports['port_option_set'];
   Module['_port_thread_dump'] = _port_thread_dump = wasmExports['port_thread_dump'];
   Module['_port_set_pad'] = _port_set_pad = wasmExports['port_set_pad'];
   Module['_port_vi_retrace'] = _port_vi_retrace = wasmExports['port_vi_retrace'];
@@ -2342,6 +2350,7 @@ function assignWasmExports(wasmExports) {
   Module['_rtw_save_load'] = _rtw_save_load = wasmExports['rtw_save_load'];
   Module['_rtw_start'] = _rtw_start = wasmExports['rtw_start'];
   Module['_rtw_input'] = _rtw_input = wasmExports['rtw_input'];
+  Module['_rtw_option'] = _rtw_option = wasmExports['rtw_option'];
   Module['_rtw_pause'] = _rtw_pause = wasmExports['rtw_pause'];
   Module['_rtw_resize'] = _rtw_resize = wasmExports['rtw_resize'];
   Module['_port_rtw_retrace'] = _port_rtw_retrace = wasmExports['port_rtw_retrace'];
@@ -2412,6 +2421,7 @@ function assignWasmExports(wasmExports) {
   dynCalls['ffffff'] = dynCall_ffffff = wasmExports['dynCall_ffffff'];
   dynCalls['vifiii'] = dynCall_vifiii = wasmExports['dynCall_vifiii'];
   dynCalls['viiiif'] = dynCall_viiiif = wasmExports['dynCall_viiiif'];
+  dynCalls['viiiiiiii'] = dynCall_viiiiiiii = wasmExports['dynCall_viiiiiiii'];
   dynCalls['fffffff'] = dynCall_fffffff = wasmExports['dynCall_fffffff'];
   dynCalls['iiiiiiiiiii'] = dynCall_iiiiiiiiiii = wasmExports['dynCall_iiiiiiiiiii'];
   dynCalls['vifffii'] = dynCall_vifffii = wasmExports['dynCall_vifffii'];
@@ -2614,6 +2624,8 @@ var wasmImports = {
   rtw_build_id: _rtw_build_id,
   /** @export */
   rtw_log: _rtw_log,
+  /** @export */
+  rtw_option_changed: _rtw_option_changed,
   /** @export */
   rtw_rumble: _rtw_rumble
 };
