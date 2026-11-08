@@ -143,11 +143,18 @@ EMSCRIPTEN_KEEPALIVE void port_thread_dump(void) {
 }
 
 /* host side: run threads until none is runnable */
+extern unsigned port_rcp_pending;
+void port_rcp_complete(void);
 void port_run_threads(void) {
     if (!host_init) { emscripten_fiber_init_from_current_context(&host_fiber, host_astack, A_STACK); host_init = 1; }
     if (cur) { port_log("[os] port_run_threads called from a thread\n"); return; }
     PcThread *p;
-    while ((p = pick())) swap_to(&host_fiber, p);
+    for (;;) {
+        while ((p = pick())) swap_to(&host_fiber, p);
+        cur = NULL;
+        if (!port_rcp_pending) break;
+        port_rcp_complete();   /* S5: the RCP finishes the graphics tasks started meanwhile (pc_rcp.c) */
+    }
     cur = NULL;
 }
 

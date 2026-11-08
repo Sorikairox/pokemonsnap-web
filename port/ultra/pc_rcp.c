@@ -3,9 +3,9 @@
  * The host drives the retrace: port_vi_retrace() (one NTSC field, 60 Hz) shows the next framebuffer, posts the VI
  * event of osViSetEvent and runs the threads until none is runnable. osSpTaskStart (osSpTaskLoad + osSpTaskStartGo)
  * runs a task synchronously: graphics tasks go to port_gfx_task() (the renderer, port/gfx; a weak default here only
- * counts), audio tasks complete at once (audio HLE: S7). The SP-done event, then for graphics the DP full-sync event,
- * are posted right away; the scheduler thread handles them after it returns from osSpTaskStart, as it would a few
- * hundred microseconds later on the console. Written for this port. */
+ * counts), audio tasks complete at once (audio HLE: S7). For graphics the SP-done then DP full-sync events are
+ * posted when no thread is runnable any more (S5, port_rcp_complete), as the RDP finishes milliseconds later on the
+ * console; the audio task's SP-done is posted right away. Written for this port. */
 #include "pc_os.h"
 #include <emscripten.h>
 #include <emscripten/heap.h>
@@ -18,6 +18,16 @@ __attribute__((weak)) void port_gfx_task(void *task) { (void)task; }
  * mirror address, or NULL before the first swap) and the VI state; the renderer's strong definition presents it. */
 __attribute__((weak)) void port_vi_present(void *framebuffer, const void *vi_mode, int black) {
     (void)framebuffer; (void)vi_mode; (void)black;
+}
+
+/* S5: graphics tasks run but not yet reported (SP done + DP full sync), posted by port_run_threads when idle */
+unsigned port_rcp_pending;
+void port_rcp_complete(void) {
+    while (port_rcp_pending) {
+        port_rcp_pending--;
+        pc_post_event(N64_EVENT_SP);
+        pc_post_event(N64_EVENT_DP);
+    }
 }
 
 /* ---------------------------------------------------------------- VI */
@@ -154,8 +164,12 @@ void osSpTaskStartGo(void *tv) {
         port_log("[task] vi %u gfx #%u dl %08X ucode %08X: %u commands, hash %08X\n", port_vi_count, port_gfx_tasks,
                  (uint32_t)(uintptr_t)t->data_ptr, port_wasm_to_n64(t->ucode), st.cmds, st.hash);
         port_gfx_task(t);
-        pc_post_event(N64_EVENT_SP);
-        pc_post_event(N64_EVENT_DP);
+        /* S5: the RCP "finishes" when the CPU has nothing left to run (port_run_threads), not at once: on the console
+         * the RDP takes milliseconds, and the game thread queues the frame's SC_TASK_TYPE_GFX_END meanwhile. sched.c
+         * attaches its framebuffer to the running gfx task only then, and at DP full sync calls scPostProcessFunc
+         * (the Pokemon detector) and swaps; with events posted at once the GFX_END found no running task, swapped
+         * directly and the detector never ran. */
+        port_rcp_pending++;
     } else {
         if (t->type == M_AUDTASK_) port_audio_tasks++;
         else { port_other_tasks++; port_log("[sp] task type %u\n", t->type); }
