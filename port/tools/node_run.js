@@ -4,6 +4,9 @@
 // --out DIR (gitignored port_work/...): writes DIR/log.txt (everything), DIR/tasks.txt (the deterministic part:
 // [task] [ovl] [stub] [os] [icall] lines, compared between runs), DIR/dl_hist.txt (the first display list's opcode
 // histogram). Nothing is written without --out.
+// --readback FILE (S6): replay a browser run's read-back journal (port/web/run.mjs writes OUT/readback.bin): the GPU
+// write-backs node cannot compute are written at the same points, so node follows that run's game state (same build,
+// same --frames/--tap/--input).
 const path = require('path');
 const fs = require('fs');
 const argv = process.argv.slice(2);
@@ -11,6 +14,9 @@ const [js, rom] = argv;
 let rest = argv.slice(2), out = null;
 const oi = rest.indexOf('--out');
 if (oi >= 0) { out = rest[oi + 1]; rest.splice(oi, 2); }
+let readback = null;
+const ri = rest.indexOf('--readback');
+if (ri >= 0) { readback = rest[ri + 1]; rest.splice(ri, 2); }
 if (!js || !rom) { console.error('usage: node node_run.js <module.js> <rom> [--out DIR] [args]'); process.exit(2); }
 const lines = [];
 const log = s => { lines.push(s); console.error(s); };
@@ -21,6 +27,13 @@ factory({ print: log, printErr: log }).then(m => {
   m.HEAPU8.set(data, p);
   if (m._port_set_rom(p, data.length) !== 0) { console.error('port_set_rom failed'); process.exit(1); }
   m._free(p);
+  if (readback) {
+    const j = fs.readFileSync(readback);
+    const q = m._malloc(j.length);
+    m.HEAPU8.set(j, q);
+    if (m._port_rb_load(q, j.length) !== 0) { console.error('port_rb_load failed'); process.exit(1); }
+    m._free(q);
+  }
   const rc = m.callMain(rest);
   log(`[node_run] main returned ${rc}`);
   if (out) {

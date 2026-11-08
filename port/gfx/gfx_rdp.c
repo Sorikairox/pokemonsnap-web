@@ -86,6 +86,104 @@ static void zimg_resolve(ZImg *z, int y0, int y1);
 
 static void flush(void);
 
+/* ------------------------------------------------------------------ read-back journal (S6: node parity) */
+/* Write-backs are the only way the GPU changes what the game's CPU sees. A browser run can record every byte they
+ * changed (port_rb_record), grouped by "points" where the CPU can next observe memory: the end of a graphics task,
+ * an osInvalDCache, a VI frame. Node has no GL; given the journal (port_rb_load) it writes the same bytes at the same
+ * points, so a node run with the same input follows the browser's game state past the detector's first read-back.
+ * Record: {u32 seq, u32 kind, u32 addr, u32 len, len bytes padded to 4}; a window that changed memory ends with a
+ * {seq, kind, 0, 0} record (kind 1 task, 2 osInvalDCache, 3 VI frame), checked on replay. Raw wasm addresses and
+ * bytes in the vbe layout: a journal is only valid for the build that recorded it, and it is ROM-derived
+ * (port_work/ only). */
+static int rb_mode;            /* 0 off, 1 record, 2 replay */
+static uint32_t rb_seq;
+static unsigned char *rb_buf;  /* record: the journal; replay: the loaded journal */
+static uint32_t rb_len, rb_cap, rb_pos;
+static int rb_open;            /* record: this window has entries */
+static unsigned char *rb_old;
+static uint32_t rb_old_cap;
+static unsigned rb_desync;
+
+static void rb_put(const void *p, uint32_t n) {
+    if (rb_len + n > rb_cap) {
+        uint32_t c = rb_cap ? rb_cap : 1u << 20;
+        while (c < rb_len + n) c *= 2;
+        unsigned char *b = realloc(rb_buf, c);
+        if (!b) { rb_mode = 0; port_log("[readback] journal: out of memory, recording stopped\n"); return; }
+        rb_buf = b; rb_cap = c;
+    }
+    memcpy(rb_buf + rb_len, p, n);
+    rb_len += n;
+}
+static void rb_put_hdr(uint32_t kind, uint32_t addr, uint32_t len) {
+    uint32_t h[4] = {rb_seq, kind, addr, len};
+    rb_put(h, sizeof h);
+}
+/* a write-back is about to change [p, p + n): keep the old bytes */
+static void rb_begin(const unsigned char *p, uint32_t n) {
+    if (rb_mode != 1) return;
+    if (n > rb_old_cap) { free(rb_old); rb_old = malloc(n); rb_old_cap = rb_old ? n : 0; }
+    if (rb_old) memcpy(rb_old, p, n);
+}
+/* ... and has: journal the runs that changed */
+static void rb_end(const unsigned char *p, uint32_t n) {
+    if (rb_mode != 1 || !rb_old || n > rb_old_cap) return;
+    uint32_t i = 0;
+    while (i < n) {
+        if (p[i] == rb_old[i]) { i++; continue; }
+        uint32_t j = i + 1, same = 0;
+        while (j < n && same < 16) { if (p[j] == rb_old[j]) same++; else same = 0; j++; }
+        j -= same;
+        uint32_t len = j - i, pad = 0;
+        rb_put_hdr(0, (uint32_t)(uintptr_t)(p + i), len);
+        rb_put(p + i, len);
+        rb_put(&pad, (4 - (len & 3)) & 3);
+        rb_open = 1;
+        i = j;
+    }
+}
+static void rb_point(uint32_t kind) {
+    if (rb_mode == 1) {
+        if (rb_open) rb_put_hdr(kind, 0, 0);
+        rb_open = 0;
+    } else if (rb_mode == 2) {
+        while (rb_pos + 16 <= rb_len) {
+            uint32_t h[4];
+            memcpy(h, rb_buf + rb_pos, 16);
+            if (h[0] != rb_seq) break;
+            rb_pos += 16;
+            if (h[3] == 0) {
+                if (h[1] != kind && !rb_desync++)
+                    port_log("[readback] desync at point %u: journal kind %u, this run %u\n", rb_seq, h[1], kind);
+                continue;
+            }
+            if (rb_pos + h[3] > rb_len) { rb_pos = rb_len; break; }
+            memcpy((void *)(uintptr_t)h[2], rb_buf + rb_pos, h[3]);
+            rb_pos += (h[3] + 3) & ~3u;
+        }
+        if (rb_pos + 16 <= rb_len && ((const uint32_t *)(rb_buf + rb_pos))[0] < rb_seq && !rb_desync++)
+            port_log("[readback] desync at point %u: journal behind\n", rb_seq);
+    }
+    rb_seq++;
+}
+void port_rb_record(int on) {
+    if (on && gl_ok != 0) { rb_mode = 1; rb_seq = 0; rb_len = 0; rb_open = 0; }
+    else if (!on && rb_mode == 1) rb_mode = 0;
+}
+unsigned char *port_rb_journal(void) { return rb_buf; }
+uint32_t port_rb_journal_size(void) { return rb_len; }
+uint32_t port_rb_point_count(void) { return rb_seq; }
+/* node: replay a journal (the bytes are copied); the first point of this run must be the journal's first */
+int port_rb_load(const unsigned char *p, uint32_t n) {
+    free(rb_buf);
+    rb_buf = malloc(n ? n : 1);
+    if (!rb_buf) return -1;
+    memcpy(rb_buf, p, n);
+    rb_len = rb_cap = n; rb_pos = 0; rb_seq = 0; rb_mode = 2; rb_desync = 0;
+    port_log("[readback] replaying a journal of %u bytes\n", n);
+    return 0;
+}
+
 
 static int bpp_of(int siz) { return siz == SIZ_32b ? 4 : 2; }
 static uint32_t hash_words(const unsigned char *p, uint32_t bytes) {
@@ -107,6 +205,7 @@ static void target_resolve(Target *t, int y0, int y1) {
     glBindFramebuffer(GL_READ_FRAMEBUFFER, t->fbo);
     glPixelStorei(GL_PACK_ALIGNMENT, 1);
     glReadPixels(0, y0, w, n, GL_RGBA, GL_UNSIGNED_BYTE, px);
+    rb_begin(t->addr + (size_t)y0 * w * bpp, (uint32_t)(n * w * bpp));
     for (int y = 0; y < n; y++) {
         unsigned char *row = t->addr + (size_t)(y0 + y) * w * bpp;
         const unsigned char *s = px + (size_t)y * w * 4;
@@ -117,6 +216,7 @@ static void target_resolve(Target *t, int y0, int y1) {
             for (int x = 0; x < w; x++, s += 4)
                 vbe_st32(row + 4 * x, (uint32_t)s[0] << 24 | (uint32_t)s[1] << 16 | (uint32_t)s[2] << 8 | s[3]);
     }
+    rb_end(t->addr + (size_t)y0 * w * bpp, (uint32_t)(n * w * bpp));
     free(px);
     port_gfx_stats.resolves++;
     port_gfx_stats.resolve_px += (unsigned)(w * n);
@@ -258,8 +358,8 @@ static void resolve_range_skip(const unsigned char *p, uint32_t n, const ZImg *s
 static void resolve_range(const unsigned char *p, uint32_t n) { resolve_range_skip(p, n, 0); }
 
 void port_gfx_inval_dcache(const void *p, uint32_t len) {
-    if (gl_ok != 1) return;
-    resolve_range((const unsigned char *)p, len);
+    if (gl_ok == 1) resolve_range((const unsigned char *)p, len);
+    rb_point(2);
 }
 void port_gfx_writeback_dcache(const void *p, uint32_t len) {
     if (gl_ok != 1) return;
@@ -782,11 +882,13 @@ static void zimg_resolve(ZImg *z, int y0, int y1) {
     glBindTexture(GL_TEXTURE_2D, 0);
     glPixelStorei(GL_PACK_ALIGNMENT, 1);
     glReadPixels(0, 0, w, n, GL_RGBA, GL_UNSIGNED_BYTE, px);
+    rb_begin(z->addr + (size_t)y0 * w * 2, (uint32_t)(n * w * 2));
     for (int y = 0; y < n; y++) {
         unsigned char *row = z->addr + (size_t)(y0 + y) * w * 2;
         const unsigned char *s = px + (size_t)y * w * 4;
         for (int x = 0; x < w; x++, s += 4) vbe_st16(row + 2 * x, (unsigned)s[0] << 8 | s[1]);
     }
+    rb_end(z->addr + (size_t)y0 * w * 2, (uint32_t)(n * w * 2));
     free(px);
     port_gfx_stats.zresolves++;
     port_gfx_stats.zresolve_px += (unsigned)(w * n);
@@ -1157,12 +1259,17 @@ static void fill_rect(uint32_t w0, uint32_t w1) {
 }
 
 /* ------------------------------------------------------------------ RDP commands */
+static void rdp_end_task_gl(void);
 void rdp_reset_task(void) {
     state_dirty = 1;
     cur_target = 0;
     cur_zw = 0;
 }
 void rdp_end_task(void) {
+    rdp_end_task_gl();
+    rb_point(1);
+}
+static void rdp_end_task_gl(void) {
     if (gl_ok != 1) return;
     flush();
     /* colour images that are not framebuffers (never shown by the VI) are written back at the end of every task:
@@ -1246,7 +1353,12 @@ int rdp_target_width(void) { return cur_target ? cur_target->width : 320; }
 int rdp_target_height(void) { return cur_target ? cur_target->height : 240; }
 
 /* ------------------------------------------------------------------ display (VI) */
+static void vi_frame(const void *fb, int width);
 void port_gfx_vi_frame(const void *fb, int width) {
+    vi_frame(fb, width);
+    rb_point(3);
+}
+static void vi_frame(const void *fb, int width) {
     if (port_gfx_init() < 0) return;
     flush();
     unsigned char *p = fb ? gfx_addr((uint32_t)(uintptr_t)fb) : 0;

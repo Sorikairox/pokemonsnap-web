@@ -535,7 +535,8 @@ def main():
         '-sSTACK_SIZE=1MB', '-sASYNCIFY', '-sASYNCIFY_STACK_SIZE=65536', '-sMODULARIZE=1',
         '-sEXPORT_NAME=createPokemonSnap', '-sINVOKE_RUN=0', '-sEXIT_RUNTIME=0', '-sENVIRONMENT=worker,node',
         '-sERROR_ON_UNDEFINED_SYMBOLS=1', '-sEXPORTED_FUNCTIONS=_main,_malloc,_free,_port_set_rom,_port_stub_report,_port_vi_retrace,_port_set_pad,'
-        '_port_flash_image,_port_flash_generation,_port_gfx_log_stats,_port_gfx_set_log_ops',
+        '_port_flash_image,_port_flash_generation,_port_gfx_log_stats,_port_gfx_set_log_ops,_port_rb_record,_port_rb_journal,'
+        '_port_rb_journal_size,_port_rb_load,_port_rb_point_count',
         '-sEXPORTED_RUNTIME_METHODS=HEAPU8,HEAP32,callMain', '--profiling-funcs',
         '--js-library', 'port/gfx/gfx_gl.js', '-sMAX_WEBGL_VERSION=2', '-sMIN_WEBGL_VERSION=2',   # S3c: renderer
         '-Wl,--error-limit=0', f'-Wl,-Map={OUT}/pokemonsnap.map']
