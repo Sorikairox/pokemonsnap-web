@@ -30,3 +30,8 @@ venv/
 
 /report.json
 /*_report.zip
+
+port_work/
+*.n64
+*.z64
+*.v64
