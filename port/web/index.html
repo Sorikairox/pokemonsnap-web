@@ -11,6 +11,20 @@
   const w = new Worker('worker.js');
   w.onerror = (e) => fetch('/log', { method: 'POST', body: '[web] worker error: ' + e.message + '\n' })
     .then(() => fetch('/done', { method: 'POST' }));
+  if (cfg.play) {   // S7: play the drained PCM (cfg.play), scheduled back to back after a short lead
+    const ac = new AudioContext();
+    let at = 0;
+    w.onmessage = (e) => {
+      if (!e.data.pcm) return;
+      const s = new Int16Array(e.data.pcm), n = s.length >> 1, b = ac.createBuffer(2, n, e.data.rate);
+      const l = b.getChannelData(0), r = b.getChannelData(1);
+      for (let i = 0; i < n; i++) { l[i] = s[2 * i] / 32768; r[i] = s[2 * i + 1] / 32768; }
+      const src = ac.createBufferSource();
+      src.buffer = b; src.connect(ac.destination);
+      at = Math.max(at, ac.currentTime + 0.1);
+      src.start(at); at += n / e.data.rate;
+    };
+  }
   w.postMessage({ canvas, cfg }, [canvas]);
 })();
 </script>

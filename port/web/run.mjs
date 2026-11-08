@@ -2,6 +2,8 @@
 //   node port/web/run.mjs --out port_work/DIR [--rom ./pokemonsnap.z64] [--frames 600] [--shots 60,120,...]
 //        [--every N] [--tap N MASK] [--input F:MASK[:LEN],...] [--logops F,...] [--pace fast|raf] [--timeout MS] [--chrome PATH]
 //        [--no-readback] [--tap-end F]   (--input entries: F:MASK[:LEN[:X[:Y]]], X/Y the stick, -128..127)
+//        [--audio] [--play]   (S7: OUT/audio.wav, the PCM the host drained; --play plays it in the page, headless
+//        Chrome stays muted)
 // Serves port/web/{index.html,worker.js}, port/build/web/pokemonsnap.{js,wasm} and the player's ROM (/rom, read from
 // --rom: never copied, never served from the repo) on 127.0.0.1, starts Chrome headless (muted, SwiftShader, its own
 // temporary profile) and drives it over the DevTools protocol (the port/gfx/test/cdp.mjs method: node's own WebSocket,
@@ -33,7 +35,8 @@ const tap = tapI >= 0 ? [+args[tapI + 1], Number(args[tapI + 2])] : null;
 const input = (opt('input', '') || '').split(',').filter(Boolean).map((s) => s.split(':').map(Number));
 const logops = (opt('logops', '') || '').split(',').filter(Boolean).map(Number);
 const cfg = { frames, shots: [...shots].sort((a, b) => a - b), tap, input, logops, pace: opt('pace', 'fast'), args: [],
-  readback: !args.includes('--no-readback'), tapEnd: +opt('tap-end', 0) };
+  readback: !args.includes('--no-readback'), tapEnd: +opt('tap-end', 0),
+  audio: args.includes('--audio'), play: args.includes('--play') };
 const timeout = +opt('timeout', 600000);
 const chrome = opt('chrome', '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome');
 if (!existsSync(romPath)) { console.error(`no ROM at ${romPath} (port/docker/run.sh rom PATH writes ./pokemonsnap.z64)`); process.exit(2); }
@@ -72,6 +75,7 @@ const server = createServer((req, res) => {
       nshots++;
     } else if (url.pathname === '/log') log(body.toString());
     else if (url.pathname === '/readback') writeFileSync(join(out, 'readback.bin'), body);
+    else if (url.pathname === '/audio') writeFileSync(join(out, 'audio.wav'), body);
     else if (url.pathname === '/done') finished(true);
     res.writeHead(200); res.end();
   });

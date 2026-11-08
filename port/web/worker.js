@@ -11,6 +11,10 @@
 //               'raf' (one retrace per requestAnimationFrame: the display's rate)
 //   cfg.readback  record the read-back journal (every byte GPU write-backs changed, S6) and POST it to /readback at
 //               the end: node replays it (port/tools/node_run.js --readback) to follow this run's game state
+//   cfg.audio   (S7) drain the PCM the virtual AI played after every retrace (rtw_audio_drain, as the retrowser host
+//               does) and POST it to /audio at the end: the harness writes OUT/audio.wav
+//   cfg.play    (S7) also send each drained block to the page, which plays it (Web Audio; off by default, and
+//               headless Chrome runs muted)
 // The ROM is fetched from /rom, which the harness serves from the player's own file (never from the repo).
 // Results go back to the harness by POST: /shot?name=fNNNNN.png, /log, /done.
 importScripts('pokemonsnap.js');
@@ -46,6 +50,8 @@ onmessage = async (e) => {
     const rc = M.callMain(cfg.args || []);
     print(`[web] main returned ${rc}; ${cfg.frames} retraces, pace ${cfg.pace}`);
     const shots = new Set(cfg.shots || []);
+    const pcm = [];   // S7: Int16Array blocks drained per retrace
+    let pcmFrames = 0;
     const t0 = performance.now();
     let tl = t0;
     for (let f = 1; f <= cfg.frames; f++) {
@@ -55,6 +61,15 @@ onmessage = async (e) => {
       if (lo) M._port_gfx_set_log_ops(1);
       M._port_vi_retrace();
       if (lo) M._port_gfx_set_log_ops(0);
+      if (cfg.audio || cfg.play) {   // S7: the retrowser host's pull (rtw_audio_drain / rtw_audio_buffer)
+        const n = M._rtw_audio_drain() >>> 0;
+        if (n) {
+          const p = M._rtw_audio_buffer() >>> 0;
+          const blk = new Int16Array(M.HEAPU8.buffer.slice(p, p + 4 * n));
+          if (cfg.audio) { pcm.push(blk); pcmFrames += n; }
+          if (cfg.play) postMessage({ pcm: blk, rate: M._rtw_audio_rate() });
+        }
+      }
       if (shots.has(f)) {
         M._port_gfx_log_stats();
         const blob = await canvas.convertToBlob({ type: 'image/png' });
@@ -69,6 +84,14 @@ onmessage = async (e) => {
       if (cfg.pace === 'raf') await raf(); else await tick();
     }
     M._port_gfx_log_stats();
+    if (cfg.audio) {
+      const rate = M._rtw_audio_rate(), h = new DataView(new ArrayBuffer(44)), w = (o, t) => [...t].forEach((c, i) => h.setUint8(o + i, c.charCodeAt(0)));
+      w(0, 'RIFF'); h.setUint32(4, 36 + pcmFrames * 4, true); w(8, 'WAVEfmt '); h.setUint32(16, 16, true); h.setUint16(20, 1, true);
+      h.setUint16(22, 2, true); h.setUint32(24, rate, true); h.setUint32(28, rate * 4, true); h.setUint16(32, 4, true);
+      h.setUint16(34, 16, true); w(36, 'data'); h.setUint32(40, pcmFrames * 4, true);
+      await fetch('/audio', { method: 'POST', body: new Blob([h, ...pcm]) });
+      print(`[web] audio: ${pcmFrames} stereo frames at ${rate} Hz, PCM hash ${(M._port_audio_pcm_hash() >>> 0).toString(16)}`);
+    }
     if (cfg.readback) {
       const n = M._port_rb_journal_size() >>> 0, p = M._port_rb_journal() >>> 0;
       await fetch('/readback', { method: 'POST', body: M.HEAPU8.slice(p, p + n) });
