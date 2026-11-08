@@ -2,6 +2,50 @@
 
 Newest session first. Read `docs/port/PLAN.md` (goal, survey, approach, phases, rules) before working.
 
+## S7 + S8 + R1 — 2026-11-09: audio, FlashRAM save, renderer fixes (parallel worktrees, merged)
+
+Three sessions ran in parallel worktrees from `web` 834301c and were merged (e9471c3: S8 with S7, harness and build
+options combined; d15b58f: R1). Session notes: `docs/port/notes/S7.md`, `S8.md`, `R1.md`; designs: AUDIO.md,
+SAVE.md, RENDERER.md ("Session R1").
+
+**S7 — audio** (760eb55, fd40ba5, a9b9f28, a360b11): aspMain HLE (`port/audio/audio_hle.c`: libaudio's 15 ABI
+commands, ADPCM, resampler table read from aspMain's data, envelope mixer, reverb) and a virtual AI
+(`port/audio/audio_ai.c`, `osAi*`, AI_LEN/AI_STATUS reads, `port_ai_retrace`). Before S7 the game read AI_LEN = 0
+and sequences ran 1.2x fast; now 528/544-sample frames at 32006 Hz, 0 FIFO-full. Exports `rtw_audio_rate/drain/buffer`
+(int16 stereo). Tests `port/audio/test/run.sh` (5 checks), `node_run.js --wav`, `run.mjs --audio [--play]`,
+`wav_report.mjs` (tempo / tuning within a few cents, 0 clipped). Cost 0.04-0.08 ms per audio task.
+
+**S8 — save** (4d0d64d, ffae7c4, 7f86f49, e44e1a5, 4a915a3): the game's own `src/os/osFlash.c` compiled as game code
+over a Macronix FlashRAM chip model (`port/save/flashram.c`, PI device: commands, status, erase, page program);
+128 KiB image in console byte order, generation counter, `rtw_save_ptr/size/generation` (`port/save/save.c`). Save
+struct flag words 0x64 / 0x68 MSB-first under `#ifdef PORT`. Harness `--save IN` / `--save-out OUT` (node) and
+`--save IN` + OUT/flash.fla (browser); `port/save/snap_save.py` decodes / checks an image (game's MD4 variant).
+`UnkIndigoHalibut.unk_18_*` does not reach the save.
+
+**R1 — renderer** (c90a4b4, 5c16425, 03a84dc, 4a205d1, 191d14e, 9c47f03, ccca0e0): texture wrap modes are sampler
+state set at every bind (grey cliffs / end tunnel); CPU side-plane clipping of eye-plane triangles like F3DEX2_NoN
+(sky box corners); the RSP's othermode copy reloaded per task / ucode load (intro "mist", every world triangle had
+leaked `G_ZS_PRIM`); primitive depth in screen-z units; debug pixel probe (`port_gfx_set_probe`, not exported to the
+page). The darker band on Oak's check is the game's own sprite (no change). 4 new gfx tests, each failing without
+its fix.
+
+Orchestrator verification after merging (d15b58f): `port/gfx/test/run.sh` all OK (22); link OK; full browser route
+with `--audio` (S8 route: Beach -> camera check -> Oak's check -> lab -> Save) reaches Oak's check (Pidgey **Total
+2810**) and saves in the lab at retrace 17961 (`[save] flash generation 1006`; `snap_save.py`: version_ok + md4_ok);
+reload with `--save` shows "I have been waiting for you, AAAAAAA."; matching build `build/pokemonsnap.z64: OK`.
+
+### Remaining / next
+
+1. Album not exercised (no route uses the Album Mark); bitfield structs still in clang order elsewhere (S8 notes 3:
+   `cave.h SomeBits`, `app_level.h EnvSound`, `photo_check.h Photo.unk_1A_*`): check whether ROM data meets them.
+2. Renderer: near-plane region removed by GL (the console clamps Z); clamp + mask larger than the mask repeats in GL;
+   texture LOD / 3-point / dither / chroma key not implemented (none needed so far).
+3. No console / emulator reference yet for audio loudness and reverb, score pixel counts, sky shading.
+4. Read-back journals are per build: regenerate after every change for node replays.
+5. Next: S9 retrowser module (rtw_* exports wired, worker build, manifest, check --rom, local host e2e).
+
+Downloads: none.
+
 ## S6 — 2026-11-09: photos, Oak's check scored, node follows the browser (read-back journal)
 
 Root causes, each fixed in the renderer / harness (no game C edits; matching build unchanged), one commit each:
