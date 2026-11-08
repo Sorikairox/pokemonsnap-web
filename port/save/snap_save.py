@@ -2,12 +2,30 @@
 """Decode and check a Pokemon Snap FlashRAM image (session S8, docs/port/SAVE.md).
 
     python3 port/save/snap_save.py IMAGE.fla [--json]
+    python3 port/save/snap_save.py --write OUT.fla (--base IN.fla | --new NAME) [--courses N] [--items LIST]
+                                   [--flag NAME=0|1 ...]        (session S10a: craft a progress save)
 
 IMAGE is the 131072-byte FlashRAM in console byte order (big-endian words, as on the cartridge; the port's
 OUT/flash.fla). The layout is the game's save struct (src/more_funcs/more_funcs.h UnkBigBoy, 0x1F2A4 bytes at flash
 offset 0) and its checks (src/more_funcs/5BF20.c func_800BF178_5C018: version string + MD4 over `data`, the game's own
 MD4 variant in src/more_funcs/md4.c, reimplemented here). Exit code 0 when the game would accept the save (it then
 boots with it instead of a new file), 1 otherwise. Reads only the given file; prints names, numbers, offsets.
+
+--write sets progress fields the way the game's own setters store them and recomputes the MD4 as func_800BF244_5C0E4
+does before writing (func_800BF10C_5BFAC: MD4_Finalize over `data`), then checks the result with the decoder above:
+  --base IN    start from a save the game wrote (keeps name, photos, scores); or
+  --new NAME   start from the game's new file (func_800C042C_5D2CC: all zero, every photo slot unk_04 = -1, unk_64_05,
+               unk_64_22 = 0x4C, unk_64_16 = 0x24, the self offsets, version string) with NAME (ASCII -> full-width
+               EUC-JP, as the name entry writes it) and PFID_16 (unk_68_31, set by menu_new_game A5CC50.c after the
+               name entry). A save the game wrote (--base) is the better start: it holds what a real first trip sets
+               (e.g. PFID_7 = unk_64_08: the lab menu with the PKMN Album, oaks_lab 8A8A50.c)
+  --courses N  courses open beyond the Beach, 0..6 (unk_64_29, func_800BFC70_5CB10: the lab's course list
+               D_80195CEC_95B50C[N]; course order Beach 0, Tunnel 1, Volcano 2, River 3, Cave 4, Valley 5, Rainbow 6,
+               include/enums.h). unk_50 (func_800C02A0_5D140, the course Oak announces) is set to the same N so the lab
+               shows no "new course" sequence.
+  --items LIST comma list of apple, pester, flute, dash (hasApple, hasPesterBall, hasFlute, hasDashEngine)
+  --flag NAME=V  any single-bit flag of word 0x64 / 0x68 by the names printed by the decoder
+Crafted images are personal data: write them under port_work/ only.
 """
 import json
 import struct
@@ -130,7 +148,84 @@ def decode(img):
     return d
 
 
+FLAG_BITS = {  # word 0x64 bit -> name, as the decoder prints them (console bit numbering, MSB-first bitfields)
+    15: 'hasApple', 14: 'hasPesterBall', 13: 'hasFlute', 12: 'unk_64_12', 11: 'unk_64_11', 10: 'hasDashEngine',
+    9: 'unk_64_09', 8: 'unk_64_08', 7: 'hasFinishedTutorial', 6: 'unk_64_06', 5: 'unk_64_05', 4: 'unk_64_04',
+    3: 'unk_64_03', 2: 'zoomSwitch', 1: 'invertedY', 0: 'unk_64_00'}
+ITEMS = {'apple': 'hasApple', 'pester': 'hasPesterBall', 'flute': 'hasFlute', 'dash': 'hasDashEngine'}
+
+
+def new_image(name):
+    """func_800C042C_5D2CC (new file) + a name + PFID_16; the rest of the flash stays erased"""
+    img = bytearray(b'\xFF' * SIZE)
+    img[:STRUCT_SIZE] = bytes(STRUCT_SIZE)
+    for i in range(69 + 4):                       # unk_180[69] and unk_FBA0[4] are contiguous
+        struct.pack_into('>i', img, 0x180 + i * PHOTO_SIZE + 4, -1)
+    for i in range(60):
+        struct.pack_into('>i', img, 0x10A20 + i * ALBUM_SIZE + 4, -1)
+    struct.pack_into('>4i', img, 0x20, 0x6C, 0x180, 0xFBA0, 0x10A20)
+    w64 = (0x4C << 22) | (0x24 << 16) | (1 << 5)   # unk_64_22, unk_64_16, unk_64_05
+    struct.pack_into('>I', img, 0x64, w64)
+    struct.pack_into('>I', img, 0x68, 1 << 31)      # unk_68_31 = PFID_16 (name entered)
+    img[0x10:0x20] = VERSION
+    full = b''.join(bytes([0xA3, 0xC1 + ord(c) - ord('A')]) if 'A' <= c <= 'Z' else
+                    bytes([0xA3, 0xE1 + ord(c) - ord('a')]) if 'a' <= c <= 'z' else
+                    bytes([0xA3, 0xB0 + ord(c) - ord('0')]) if '0' <= c <= '9' else b'\xA1\xA1' for c in name[:7])
+    img[0x54:0x64] = full.ljust(16, b'\0')
+    return img
+
+
+def set_flag(img, name, val):
+    for b, n in FLAG_BITS.items():
+        if n.split(' ')[0] == name:
+            w = struct.unpack_from('>I', img, 0x64)[0]
+            struct.pack_into('>I', img, 0x64, (w | 1 << b) if val else (w & ~(1 << b)))
+            return
+    if name.startswith('unk_68_') and 27 <= int(name[7:]) <= 31:
+        b = int(name[7:])
+        w = struct.unpack_from('>I', img, 0x68)[0]
+        struct.pack_into('>I', img, 0x68, (w | 1 << b) if val else (w & ~(1 << b)))
+        return
+    raise SystemExit(f'unknown flag {name}')
+
+
+def write_main(argv):
+    opt = lambda n: argv[argv.index(n) + 1] if n in argv else None
+    out = opt('--write')
+    if opt('--base'):
+        img = bytearray(open(opt('--base'), 'rb').read())
+        if len(img) != SIZE or not decode(img)['md4_ok']:
+            raise SystemExit('base image is not a save the game accepts')
+    elif opt('--new'):
+        img = new_image(opt('--new'))
+    else:
+        raise SystemExit('--write needs --base IN or --new NAME')
+    if opt('--courses') is not None:
+        n = int(opt('--courses'))
+        if not 0 <= n <= 6:
+            raise SystemExit('--courses is 0..6')
+        w = struct.unpack_from('>I', img, 0x64)[0]
+        struct.pack_into('>I', img, 0x64, (w & 0x1FFFFFFF) | (n << 29))   # unk_64_29:3, the top bits
+        struct.pack_into('>i', img, 0x50, n)                                # unk_50
+    for it in filter(None, (opt('--items') or '').split(',')):
+        set_flag(img, ITEMS[it], 1)
+    for i, a in enumerate(argv):
+        if a == '--flag':
+            k, v = argv[i + 1].split('=')
+            set_flag(img, k, int(v))
+    data = bytes(img[DATA_OFF:DATA_OFF + DATA_LEN])
+    struct.pack_into('>4I', img, 0, *snap_md4(data))
+    d = decode(img)
+    assert d['version_ok'] and d['md4_ok']
+    open(out, 'wb').write(img)
+    print(f'wrote {out}: courses {d["unk_64_29"]}, unk_50 {d["unk_50 (courses open?)"]}, flags {d["flags_set"]}, '
+          f'name {d["player_name"]}, MD4 {d["md4_computed"]}')
+    return 0
+
+
 def main():
+    if '--write' in sys.argv:
+        return write_main(sys.argv[1:])
     args = [a for a in sys.argv[1:] if not a.startswith('--')]
     if len(args) != 1:
         print(__doc__)
