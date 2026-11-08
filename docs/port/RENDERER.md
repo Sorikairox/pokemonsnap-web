@@ -38,7 +38,8 @@ Code: `port/gfx/` (`gfx.h` interface, `gfx_rsp.c` display lists + RSP, `gfx_rdp.
   and L3DEX2 data, read from `OSTask.ucode_data` / the `G_LOAD_UCODE` data at run time) at every task start and
   ucode load. `G_RDPSETOTHERMODE` sets both.
 - **Shaders**: one generated GLSL program per (combine, blender bits, cycle type, flags). Two combiner cycles with
-  all N64 inputs (NOISE, K4/K5, PRIM_LOD_FRAC; LOD_FRACTION = 0); the blender's first cycle and any cycle without
+  all N64 inputs (NOISE, K4/K5, PRIM_LOD_FRAC; LOD_FRACTION = 0); texels: `G_TF_POINT` and COPY nearest,
+  `G_TF_BILERP` the RDP's 3-point filter (R2: three NEAREST fetches in the shader); the blender's first cycle and any cycle without
   memory are evaluated in the shader (fog: `FOG, SHADE_A, IN, 1MA`), a last cycle reading memory with `FORCE_BL`
   maps to GL blending (`SRC_ALPHA, f(B)`). Alpha compare (threshold / dither), `CVG_X_ALPHA + ALPHA_CVG_SEL`
   (texture edge, 0.5), Z compare/update/decal (polygon offset), primitive depth (`z / 32` is a screen z, mapped
@@ -133,9 +134,9 @@ is deterministic (same PNG hashes run to run); node gives the same `[task]` hash
 test RDRAM; `-sGLOBAL_BASE=256MB` so the address classes match the game), serves it on 127.0.0.1, runs the host's
 Chrome headless (SwiftShader, muted) over the DevTools protocol (`test/cdp.mjs`, node's built-in WebSocket), and
 writes `log.txt` (CHECK lines), `shown.png` / `shown2.png` (canvas) and `rdram.png` / `rdram2.png` (RDRAM after
-write-back) to `port/build/gfx_test/out/` (gitignored). Two tasks, 22 checks (S6: `z_writeback`, a 64x48 Z image in
+write-back) to `port/build/gfx_test/out/` (gitignored). Two tasks, 23 checks (S6: `z_writeback`, a 64x48 Z image in
 the console format + its COPY into a colour image; R1: `tile_resize_wrap`, `eye_plane_vertex`, `othermode_per_task`,
-`prim_depth_units`, each failing without its fix): SP/DP events, culling, no unknown
+`prim_depth_units`; R2: `three_point_filter`; each failing without its fix): SP/DP events, culling, no unknown
 opcodes / bad addresses, the detector's LoadTile + COPY into an 8-wide image equals the frame centre (64/64),
 FILL, Z buffer, a 64-wide image with its own Z copied back via LoadBlock in the same task, CI4 + TLUT + alpha
 compare, RGBA16 wrap, RGBA32, IA16, I4, mirror, 2-cycle TEXEL0/TEXEL1, matrix push/mul/pop, `gSPMvpRecalc` +
@@ -143,8 +144,9 @@ compare, RGBA16 wrap, RGBA32, IA16, I4, mirror, 2-cycle TEXEL0/TEXEL1, matrix pu
 
 ## Not done / TODO
 
-- Positional lights (`G_LIGHTING_POSITIONAL`), texture LOD / mipmaps / detail (`G_TL_LOD`, LOD_FRACTION = 0),
-  chroma key, dithering, coverage/AA, the 3-point bilinear filter (GL bilinear is used), YUV combiner path (YUV is
+- Positional lights (`G_LIGHTING_POSITIONAL`), texture LOD / mipmaps / detail (`G_TL_LOD`, LOD_FRACTION = 0: the
+  game never asks for them, R2 census), G_TF_AVERAGE (GL bilinear; unused), the filter's 5-bit fraction,
+  chroma key, dithering, coverage/AA, YUV combiner path (YUV is
   converted at decode with the SetConvert K0..K3; K4/K5 are passed to the combiner), texgen scale checked only by
   reasoning, L3DEX2 line width formula approximate, NoN: side planes done (R1), but what is nearer than the near
   plane is still removed by GL (the console draws it with a clamped Z; WebGL has no depth clamp), the 16-bit Z format
@@ -180,3 +182,12 @@ Debug tool: `port_gfx_set_probe(x, y)` (up to 4 points, `x < 0` clears) logs, wh
 triangle (homogeneous test: triangles crossing w = 0 included) and texture rectangle covering that N64 pixel, with
 its vertices and the RDP state. Not exported yet: add `_port_gfx_set_probe` to port_build.py's EXPORTED_FUNCTIONS
 and a `cfg.probe` to port/web/worker.js (owned by other sessions).
+
+## Session R2 (renderer polish; notes: `docs/port/notes/R2.md`)
+
+| Seen (S10a list) | Root cause (evidence) | Fix |
+|---|---|---|
+| Valley / Volcano rocks blurry close up | the game asks for no LOD, mip level or detail texture anywhere (assets + src: every `SetTextureLOD(G_TL_TILE)`, `SetTextureDetail(G_TD_CLAMP)`, `gSPTexture` level 0; Valley frame 7801: othermode H `...AC0F`, no `G_TL_LOD`). The rock is a CI4 32x128 texture (mask) magnified ~3.5x (probe: s 95..112 over 60 px): blurry on the RDP too. The port's only departure was the filter: GL's 4-texel bilinear for `G_TF_BILERP`, which on the RDP is a 3-point filter | **3-point filter in the shader** (NEAREST fetches at texel centres; wrap/mirror/clamp per texel by the sampler); test `three_point_filter` |
+| Cave floor "seam" near the end gate | not the renderer: the straight line is the shared rim of the floor and wall triangles; four rim vertices with w 950..1238 all project to screen y 142.1..142.3, i.e. the rim lies in a plane through the eye (the end-scene camera is at the ledge's height). Nothing near the near plane (z/w >= 0.92, w >= 249), no clipping, depths ordered | none |
+| Credits 17: dots inside the staff box | not the renderer: the box bitmaps (`UIMem_Allocate(14*140*2)`, credits A937C0.c) of boxes with no photo yet start with the allocator's free-list link (next, prev); the sprite (RGBA16, XLU) shows the pointer halves as texels. Port pointers are wasm addresses (`0x10A5xxxx`, `0x102Bxxxx`: both high halves odd = opaque texels 0 and 2); on the console (`0x8025xxxx`, `0x803A6910`) only texel 0 is opaque and its colour differs. Memory-layout effect (MEMORY.md trap 2) | none in port/gfx (see notes) |
+| Tunnel purple / teal / yellow walls | the game's own colours: lighting off (geometry mode `00210405`), shade = the vertex colours, byte-identical to the ROM's tunnel vertex data (116,30,144 / 24,73,98 / 96,93,37 / 155,46,104 found in `tunnel/block*/model.vtx`); combiner TEXEL0 * SHADE, fog colour 12515C | none |
