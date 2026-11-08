@@ -2,6 +2,79 @@
 
 Newest session first. Read `docs/port/PLAN.md` (goal, survey, approach, phases, rules) before working.
 
+## S3 (S3a + S3b + S3c) — 2026-11-08: first frames in the browser; title -> menus -> Oak's lab by scripted input
+
+S3a (CPU/OS) and S3b (renderer) ran in parallel worktrees and were merged into `web` (82b30b0); S3c wired them
+together and tested the game in a browser. Session notes: `docs/port/notes/S3a.md`, `S3b.md`; designs:
+`docs/port/MEMORY.md` (threads, VI/SP/DP/AI, DMA, overlays, indirect calls, bitfields, caches), `RENDERER.md`.
+
+**S3a — libultra on fibers** (51dbefd, 2675be9, 7f06f8d): OSThreads as Emscripten fibers with fixed-address stacks,
+libultra priority scheduling, message queues/events, deterministic clock; VI retrace driven by the host
+(`port_vi_retrace`), SP/DP tasks synchronous, PI DMA from the ROM with relocation of every DMA'd segment range,
+overlay residency + C data reset, controllers (one pad, no paks), FlashRAM image, site-typed indirect-call
+trampolines + console-address -> function table (keyed by the resident overlay), `k0_ptrs` (console KSEG0 pointers
+-> mirror), MSB-first bitfields under `#ifdef PORT`, the anti-copy check in C (`app_level_CheckIllegalCopy` /* was
+func_80364360_504770 */). All 63 S2 stubs have bodies. Node: boot -> intro -> main menu -> Oak's lab (`--tap 120
+0x8000`), deterministic task log, 1.0-1.3 us per fiber switch, 0.1-0.7 ms per retrace without a renderer.
+
+**S3b — renderer** (fd99cb0): `port/gfx/` F3DEX2 + L3DEX2 interpreter (RSP on the CPU, RDP on WebGL2: byte-exact
+TMEM, generated combiner/blender shaders, Snap's `gSPMvpRecalc` + `G_MW_MATRIX` patches) with colour images kept
+coherent with RDRAM at native resolution (detector regions, score thumbnails, CPU red dot). Offline harness
+`port/gfx/test/run.sh` (hand-made lists, no ROM): 17 checks.
+
+**S3c — wiring and the browser** (76a8fdf, 584f977, docs commit):
+- One owner of the SP/DP events: `pc_rcp.c` posts them after `port_gfx_task` returns; the renderer no longer calls
+  `port_sp_task_done` / `port_dp_full_sync` (removed; `port_gfx_stats.fullsyncs` counts G_FULLSYNC, test adjusted).
+- `port/gfx/gfx_port.c`: `port_vi_present(fb, vi_mode, black)` -> `port_gfx_vi_frame(fb, comRegs.width)`; NULL fb or
+  `osViBlack` = black. `osInvalDCache` / `osWritebackDCache(All)` -> the renderer's cache hooks (KSEG0 -> mirror).
+- `port_build.py`: `port/gfx/*.c` in the PC layer, `--js-library port/gfx/gfx_gl.js -sMAX/MIN_WEBGL_VERSION=2`;
+  `gen_stubs.py`: `gl*` / `port_gfx_gl_create` are JS imports, weak undefined symbols are references. Node
+  `port-test` unchanged (no canvas: lists interpreted, nothing drawn; 0 unknown opcodes, 0 bad addresses).
+- **Browser harness `port/web/`** (index.html + worker.js + run.mjs, see RENDERER.md "Testing with the game"): the
+  module in a worker on an OffscreenCanvas (retrowser's model), `port_vi_retrace` once per frame, frame-indexed
+  input, screenshots at given retraces, `--logops` dumps + `port/tools/dl_decode.py`. Node got the same `--input`,
+  plus `--logops` and `--threads` (`port_thread_dump`).
+- All address forms from S3a's census are handled by `gfx_addr` (wasm >= 0x10000000, KSEG0, segmented with wasm
+  bases unmasked, physical < 8 MiB, `G_SETCIMG 0F000000` and mirror addresses): 0 bad addresses in 6000 retraces.
+
+Verified (screenshots looked at, all in `port_work/`, ROM-derived, never committed):
+- `node port/web/run.mjs --out port_work/s3c_web1 --frames 300 --every 30`: f00030 the N64 logo (correct colours
+  and shading); f00090..f00300 the intro flyover (sky, hills, river, trees, fog; fades; a faint "Nintendo" logo).
+- `... --out port_work/s3c_web2 --frames 1800 --every 60 --tap 120 0x8000`: f00360 title "Pokémon Snap" + PRESS
+  START, f00480 New Game / Options, f00540..f01200 name entry (photographer card, alphabet grid, AAAAAA typed),
+  f01560 / f01800 **Oak's lab** (background, Oak, dialogue box, side menu). Same overlay sequence as node.
+- `... --out port_work/s3c_web7 --frames 6000 --every 150 --tap 120 0x8000 --input 2940:0x4000:3`: Oak's dialogue,
+  f03000 the monitor showing a 3D model, f03450 course select (island map, "Should I take this course?"), retrace
+  3625 Beach loads (app_level, beach_code/assets, magikarp, pikachu); f03750+ in-level HUD (film 60, crosshair, Z
+  icon) on a **black, frozen world** (see Next 1).
+- Determinism: two runs of 1800 retraces (`port_work/s3c_det_a`, `_b`): 12/12 PNGs identical, task logs identical;
+  node (`port_work/s3c_node4000`) and browser give the same `[task]` hashes for 4000 retraces on one build.
+- `port/gfx/test/run.sh`: 17/17 checks OK. Matching build: `build/pokemonsnap.z64: OK`.
+- Cost: 5.6-6.2 ms per retrace for game + renderer in headless Chrome on SwiftShader (first 60 retraces 38 ms:
+  shader compiles); `--pace raf` runs at the display's 60 Hz.
+
+Commands: `port/docker/run.sh port` (build), `port/docker/run.sh port-test --frames N [--tap N M] [--input F:M:L]
+[--logops F] [--threads F] --out port_work/DIR` (node), `node port/web/run.mjs --out port_work/DIR --frames N
+--every K [--tap N M] [--input ...] [--logops F] [--pace raf]` (browser), `port/gfx/test/run.sh` (renderer, no ROM).
+
+### Next (S4/S5)
+
+1. **Beach is frozen with a black world** (same in node: not the renderer). Findings: the level's models are drawn
+   through `gsSPBranchLessZraw` LOD lists (part 1 loads vertex 31, the model's reference point; `draw_near` if
+   screen z <= ~1005, `draw_far` if <= ~1020, else nothing); the reference vertex sits at z 1020.22 > 1020.11 for
+   every model, i.e. the camera has not reached its start position. `--threads 3900`: only 7 object threads live
+   (updateMusic, vibrateCamera, BumpDetector_Update, 4 beach processes), no Pokémon. **Trap #4 confirmed**: the
+   Pokémon spawn wrappers are `void f(...) { Pokemon_Spawn(...); }` (22 such `void` wrappers with the
+   `pokemonInit` signature across levels, some non-trivial) and `pokemonAdd()` (503C10.c) reads their result as
+   `GObj*` (v0 on the console, 0 here) and stops spawning the block at the first NULL. Returning the value in the
+   14 simple Beach wrappers (experiment, reverted) let spawning go on but the world stayed frozen: a second cause
+   remains (the camera/rail process; look at player.c's movement process and what it waits for). Fix the v0
+   wrappers generally (a vbe/sigs rule: a void function whose return is preceded by a value-returning call returns
+   that value when called through a value-typed pointer) or per function with renames.
+2. Then the level (S5): object threads at depth, the detector read-backs (S6) on real frames.
+3. Renderer: batch texture rectangles across loads; the intro mist strip's hard edges unverified.
+4. Audio (S7), flash persistence (S8), retrowser module (S9) as planned.
+
 ## S2 — 2026-11-08: port build skeleton (all game C to wasm32, mirror + ROM loader + relocations, vbe, sigs, link)
 
 - **Image `pokemonsnap-emsdk`** (`port/docker/Dockerfile.emsdk`): the local `emscripten/emsdk:4.0.15-arm64` with its

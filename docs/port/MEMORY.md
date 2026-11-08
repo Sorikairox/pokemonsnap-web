@@ -122,8 +122,9 @@ exist in two TUs with different signatures). Result: 41 rewritten sites, 12 func
 
 ## Retrace, SP, DP, AI (S3a: pc_rcp.c)
 
-- `port_vi_retrace()` (exported; node's main loops it): the next framebuffer becomes current, `port_vi_present(fb,
-  vi_mode, black)` (weak hook, renderer), the `osViSetEvent` message every `retraceCount` retraces, then the threads
+- `port_vi_retrace()` (exported; node's main loops it, the page's worker calls it once per frame): the next
+  framebuffer becomes current, `port_vi_present(fb, vi_mode, black)` (port/gfx/gfx_port.c since S3c), the
+  `osViSetEvent` message every `retraceCount` retraces, then the threads
   run until idle. `osViSwapBuffer` / `osViGetCurrentFramebuffer` / `osViGetNextFramebuffer` as libultra.
 - `osSpTaskLoad` + `osSpTaskStartGo` (= `osSpTaskStart`): a graphics task (`M_GFXTASK`) runs `port_gfx_task(task)`
   (weak hook; the renderer's strong definition replaces it) and posts SP done then DP full sync; an audio task
@@ -154,6 +155,9 @@ exist in two TUs with different signatures). Result: 41 rewritten sites, 12 func
   (persistence: S8).
 - `osVirtualToPhysical`: mirror pointer -> console physical address (0..8 MiB); KSEG0 -> physical; any other
   pointer (C object) unchanged.
+- Caches (S3c): `osInvalDCache(p, n)` -> `port_gfx_inval_dcache` (GPU-drawn colour images in range are written into
+  RDRAM before the CPU reads them), `osWritebackDCache(p, n)` / `osWritebackDCacheAll` -> `port_gfx_writeback_dcache`
+  (images in range re-uploaded if the CPU changed them); KSEG0 pointers are mapped to the mirror first.
 - RCP registers: `SP_IMEM_START` reads 6103 and `SP_DMEM_START` -1, as after the console's boot code
   (`check_sp_imem/dmem`, flags the anti-tamper code in app_level/504770.c reads); others read 0.
 

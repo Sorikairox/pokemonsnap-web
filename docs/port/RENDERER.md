@@ -75,20 +75,27 @@ Declared in `port/gfx/gfx.h`:
 
 | Function | Caller | Notes |
 |---|---|---|
-| `void port_gfx_task(void *ostask)` | S3a `osSpTaskStart` for `M_GFXTASK` | runs the whole list synchronously; reads `OSTask` words (type 0x00, ucode 0x10, data_ptr 0x30); then calls `port_sp_task_done()` and, if `G_FULLSYNC` was reached, `port_dp_full_sync()` |
-| `void port_sp_task_done(void)` | **S3a provides** | raise the SP interrupt (scheduler's SP message); weak in the renderer |
-| `void port_dp_full_sync(void)` | **S3a provides** | raise the DP interrupt (`OS_EVENT_DP`); weak in the renderer |
-| `void port_gfx_vi_frame(const void *fb, int width)` | S3a VI, once per retrace (or on `osViSwapBuffer`) | blits colour image `fb` (any class: KSEG0/physical/wasm) of width 320/640 to the canvas, 4:3 letterboxed; CPU-drawn frames are uploaded from RDRAM |
-| `void port_gfx_inval_dcache(const void *p, uint32_t n)` | S3a `osInvalDCache` | write-back for CPU reads |
-| `void port_gfx_writeback_dcache(const void *p, uint32_t n)` | S3a `osWritebackDCache` (n) / `osWritebackDCacheAll` (n = 0) | CPU-write hint |
+| `void port_gfx_task(void *ostask)` | `pc_rcp.c osSpTaskStartGo` for `M_GFXTASK` | runs the whole list synchronously; reads `OSTask` words (type 0x00, ucode 0x10, data_ptr 0x30). **The PC layer posts SP done and DP full sync after it returns (S3c: one owner of the events)**; the renderer only counts `G_FULLSYNC` (`port_gfx_stats.fullsyncs`) |
+| `void port_gfx_vi_frame(const void *fb, int width)` | `gfx_port.c port_vi_present(fb, vi_mode, black)`, called by `pc_rcp.c port_vi_retrace` once per retrace: width = `OSViMode.comRegs.width`; NULL fb or `osViBlack` = black screen | blits colour image `fb` (any class: KSEG0/physical/wasm) of width 320/640 to the canvas, 4:3 letterboxed; CPU-drawn frames are uploaded from RDRAM |
+| `void port_gfx_inval_dcache(const void *p, uint32_t n)` | `pc_os.c osInvalDCache` (KSEG0 mapped to the mirror) | write-back for CPU reads |
+| `void port_gfx_writeback_dcache(const void *p, uint32_t n)` | `pc_os.c osWritebackDCache` (n) / `osWritebackDCacheAll` (n = 0) | CPU-write hint |
 | `int port_gfx_init(void)` | optional at boot | creates the WebGL2 context on `Module.canvas` (`gfx_gl.js`); lazy otherwise; without a canvas (node `port-test`) lists are still interpreted and nothing is drawn |
 
-Build integration (S3a owns `port/tools/port_build.py`; not edited here):
-1. compile `port/gfx/gfx_rsp.c` and `port/gfx/gfx_rdp.c` with the PC-layer flags (they include `../ultra/pc_mem.h`;
-   clean under `-Wall -Wextra`): add `port/gfx/*.c` to `pc_srcs`;
-2. link with `--js-library port/gfx/gfx_gl.js -sMAX_WEBGL_VERSION=2 -sMIN_WEBGL_VERSION=2`;
-3. the host (retrowser worker, a page, or the test) sets `Module.canvas` to an (Offscreen)Canvas before the first
-   frame. retrowser: `video: "webgl"` gives exactly that.
+Build integration (done in S3c): `port_build.py` compiles `port/gfx/*.c` with the PC-layer flags and links with
+`--js-library port/gfx/gfx_gl.js -sMAX_WEBGL_VERSION=2 -sMIN_WEBGL_VERSION=2`; `gen_stubs.py` treats `gl*` and
+`port_gfx_gl_create` as JS-library imports. Without a canvas (node `port-test`) the lists are interpreted and nothing
+is drawn. The host (retrowser's worker, `port/web/worker.js`) sets `Module.canvas` to an OffscreenCanvas.
+
+## Testing with the game (S3c, needs the player's ROM)
+
+`node port/web/run.mjs --out port_work/DIR --frames N [--every K | --shots a,b] [--tap N MASK] [--input F:MASK[:LEN],...]
+[--logops F,...] [--pace fast|raf]` serves `port/web/` + `port/build/web/` + the ROM (from `--rom`, default
+`./pokemonsnap.z64`, never copied) on 127.0.0.1, runs host Chrome headless (muted, SwiftShader) over the DevTools
+protocol and writes `DIR/fNNNNN.png` (canvas after retrace N; ROM-derived: `port_work/` only) and `DIR/log.txt`
+(module log, `[gfxstat]` counters per shot, `[gfx]` warnings). `--logops F` dumps every command of the tasks run in
+retrace F; `python3 port/tools/dl_decode.py DIR/log.txt` decodes them (combiner, render modes, tiles). Pace `fast`
+is deterministic (same PNG hashes run to run); node gives the same `[task]` hashes as the page on the same build
+(display lists contain C-object addresses: compare runs of one build only).
 
 ## Testing (no ROM)
 
@@ -113,3 +120,7 @@ compare, RGBA16 wrap, RGBA32, IA16, I4, mirror, 2-cycle TEXEL0/TEXEL1, matrix pu
   Snap's red dot follows a full-frame `osInvalDCache`, so it is not affected.
 - A Z image's RDRAM is never written (no game code reads it, as far as the survey shows).
 - Performance: no measurement yet on real frames; per-draw uniform uploads; texture hash per tile change.
+- Seen on real frames (S3c): every texture rectangle is its own draw (a texture load between rectangles sets
+  `state_dirty`): ~8000 draws per 150 retraces on the menus; fine on SwiftShader (5.6 ms per retrace for the whole
+  game), batch across loads when phones need it. The intro's mist strip (IA8, XLU, alpha = TEXEL0) has hard right /
+  bottom edges: not verified against a console capture.
