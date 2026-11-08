@@ -9,6 +9,8 @@
 // same --frames/--tap/--input).
 // --wav FILE (S7): capture every stereo frame the virtual AI played and write it as a 16-bit WAV at the AI's rate
 // (ROM-derived: port_work/ only).
+// --save FILE (S8): boot with that FlashRAM image (128 KiB, console byte order; a missing file = a blank, erased
+// flash). --save-out FILE: write the image after the run (ROM-derived personal data: keep both in port_work/).
 const path = require('path');
 const fs = require('fs');
 const argv = process.argv.slice(2);
@@ -22,6 +24,8 @@ if (wi >= 0) { wav = rest[wi + 1]; rest.splice(wi, 2); }
 let readback = null;
 const ri = rest.indexOf('--readback');
 if (ri >= 0) { readback = rest[ri + 1]; rest.splice(ri, 2); }
+const takeOpt = (name) => { const i = rest.indexOf(name); if (i < 0) return null; const v = rest[i + 1]; rest.splice(i, 2); return v; };
+const saveIn = takeOpt('--save'), saveOut = takeOpt('--save-out');
 if (!js || !rom) { console.error('usage: node node_run.js <module.js> <rom> [--out DIR] [args]'); process.exit(2); }
 const lines = [];
 const log = s => { lines.push(s); console.error(s); };
@@ -39,6 +43,13 @@ factory({ print: log, printErr: log }).then(m => {
     if (m._port_rb_load(q, j.length) !== 0) { console.error('port_rb_load failed'); process.exit(1); }
     m._free(q);
   }
+  if (saveIn && fs.existsSync(saveIn)) {
+    const sv = fs.readFileSync(saveIn);
+    const q = m._malloc(sv.length);
+    m.HEAPU8.set(sv, q);
+    m._port_save_load(q, sv.length);
+    m._free(q);
+  }
   if (wav) m._port_audio_capture(1);
   const rc = m.callMain(rest);
   log(`[node_run] main returned ${rc}`);
@@ -52,10 +63,16 @@ factory({ print: log, printErr: log }).then(m => {
     fs.writeFileSync(wav, Buffer.concat([h, Buffer.from(m.HEAPU8.subarray(q, q + n * 4))]));
     log(`[node_run] wrote ${wav}: ${n} stereo frames at ${rate} Hz, PCM hash ${(m._port_audio_pcm_hash() >>> 0).toString(16)}`);
   }
+  if (saveOut) {
+    const q = m._port_flash_image() >>> 0;
+    fs.mkdirSync(path.dirname(path.resolve(saveOut)), { recursive: true });
+    fs.writeFileSync(saveOut, m.HEAPU8.slice(q, q + m._rtw_save_size()));
+    log(`[node_run] flash image (generation ${m._port_flash_generation()}) written to ${saveOut}`);
+  }
   if (out) {
     fs.mkdirSync(out, { recursive: true });
     fs.writeFileSync(path.join(out, 'log.txt'), lines.join('\n') + '\n');
-    const det = lines.filter(l => /^\[(task|ovl|stub|os|icall|mem|frame|sp|pi|boot)\]/.test(l));
+    const det = lines.filter(l => /^\[(task|ovl|stub|os|icall|mem|frame|sp|pi|boot|save)\]/.test(l));
     fs.writeFileSync(path.join(out, 'tasks.txt'), det.join('\n') + '\n');
     fs.writeFileSync(path.join(out, 'dl_hist.txt'), lines.filter(l => l.startsWith('[dlhist]')).join('\n') + '\n');
     console.error(`[node_run] wrote ${out}/{log,tasks,dl_hist}.txt`);
