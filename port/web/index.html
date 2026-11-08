@@ -1,0 +1,16 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Pokemon Snap port test</title>
+<style>body{background:#111;margin:0} canvas{display:block;width:640px;height:480px}</style>
+<canvas id="screen" width="640" height="480"></canvas>
+<script>
+// local test page (S3c): the canvas goes to the worker as an OffscreenCanvas (as in retrowser's worker host)
+(async () => {
+  const cfg = await (await fetch('/config')).json();
+  const canvas = document.getElementById('screen').transferControlToOffscreen();
+  const w = new Worker('worker.js');
+  w.onerror = (e) => fetch('/log', { method: 'POST', body: '[web] worker error: ' + e.message + '\n' })
+    .then(() => fetch('/done', { method: 'POST' }));
+  w.postMessage({ canvas, cfg }, [canvas]);
+})();
+</script>

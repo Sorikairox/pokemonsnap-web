@@ -13,6 +13,7 @@ void game_main(void);
 int port_stub_report(void);
 void port_icall_report(void);
 void port_vi_retrace(void);
+void port_gfx_set_log_ops(int on);
 int game_sprintf(char *dst, const char *fmt, ...) __asm__("vbe.sprintf"); /* ultralib libc/sprintf.c, vbe-compiled */
 
 /* vbe self-test: the game's own sprintf (libultra xprintf, compiled through vbe.py) formats into game memory; the
@@ -89,7 +90,7 @@ static void fiber_bench(int n) {
 }
 
 int main(int argc, char **argv) {
-    int frames = 0, bench = 0, tap_every = 0, tap_mask = 0;
+    int frames = 0, bench = 0, tap_every = 0, tap_mask = 0, inputs[64][3], n_inputs = 0, logops[8], n_logops = 0, tdump[8], n_tdump = 0;
     port_log("[boot] Pokemon Snap wasm port (S3a); RDRAM mirror at %p\n", (void *)n64_rdram);
     if (!port_rom_ready()) {
         port_log("[boot] no ROM: call port_set_rom(ptr, size) before main\n");
@@ -102,6 +103,19 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--tap") && i + 2 < argc) { /* --tap N MASK: press MASK for 3 retraces every N */
             tap_every = atoi(argv[++i]);
             tap_mask = (int)strtol(argv[++i], NULL, 0);
+        } else if (!strcmp(argv[i], "--threads") && i + 1 < argc && n_tdump < 8) { /* thread dump after retrace F */
+            tdump[n_tdump++] = atoi(argv[++i]);
+        } else if (!strcmp(argv[i], "--logops") && i + 1 < argc && n_logops < 8) { /* log that retrace's commands */
+            logops[n_logops++] = atoi(argv[++i]);
+        } else if (!strcmp(argv[i], "--input") && i + 1 < argc) { /* --input F:MASK[:LEN],...: as port/web/run.mjs */
+            for (char *p = argv[++i]; *p && n_inputs < 64;) {
+                inputs[n_inputs][0] = (int)strtol(p, &p, 0);
+                inputs[n_inputs][1] = *p == ':' ? (int)strtol(p + 1, &p, 0) : 0;
+                inputs[n_inputs][2] = *p == ':' ? (int)strtol(p + 1, &p, 0) : 3;
+                n_inputs++;
+                while (*p && *p != ',') p++;
+                if (*p == ',') p++;
+            }
         }
     }
     port_mem_init();
@@ -117,8 +131,17 @@ int main(int argc, char **argv) {
     unsigned swaps_last = 0;
     void port_set_pad(int i, int buttons, int x, int y);
     for (int f = 1; f <= frames; f++) {
-        if (tap_every > 0) port_set_pad(0, f % tap_every < 3 ? tap_mask : 0, 0, 0); /* scripted input (frame-indexed) */
+        int pad = tap_every > 0 && f % tap_every < 3 ? tap_mask : 0; /* scripted input (frame-indexed) */
+        for (int k = 0; k < n_inputs; k++)
+            if (f >= inputs[k][0] && f < inputs[k][0] + inputs[k][2]) pad |= inputs[k][1];
+        port_set_pad(0, pad, 0, 0);
+        int lo = 0;
+        for (int k = 0; k < n_logops; k++) lo |= logops[k] == f;
+        if (lo) port_gfx_set_log_ops(1);
         port_vi_retrace();
+        if (lo) port_gfx_set_log_ops(0);
+        for (int k = 0; k < n_tdump; k++)
+            if (tdump[k] == f) { void port_thread_dump(void); port_thread_dump(); }
         if (f % 60 == 0 || f == frames) {
             double t = emscripten_get_now();
             port_log("[frame] retrace %d: %u gfx tasks, %u audio tasks, %u swaps of the framebuffer; threads %u live "
