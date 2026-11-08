@@ -148,6 +148,7 @@ int main(int argc, char **argv) {
         if (lo) port_gfx_set_log_ops(1);
         port_vi_retrace();
         if (lo) port_gfx_set_log_ops(0);
+        { int port_save_poll(void); port_save_poll(); } /* S8: log flash writes (node_run.js --save-out dumps at the end) */
         for (int k = 0; k < n_tdump; k++)
             if (tdump[k] == f) { void port_thread_dump(void); port_thread_dump(); }
         if (f % 60 == 0 || f == frames) {

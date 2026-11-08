@@ -11,6 +11,8 @@
 //               'raf' (one retrace per requestAnimationFrame: the display's rate)
 //   cfg.readback  record the read-back journal (every byte GPU write-backs changed, S6) and POST it to /readback at
 //               the end: node replays it (port/tools/node_run.js --readback) to follow this run's game state
+//   cfg.save    (S8) boot with the FlashRAM image the harness serves at /save; after every retrace that changed the
+//               flash the image is POSTed to /save?gen=N (the harness keeps it as OUT/flash.fla)
 // The ROM is fetched from /rom, which the harness serves from the player's own file (never from the repo).
 // Results go back to the harness by POST: /shot?name=fNNNNN.png, /log, /done.
 importScripts('pokemonsnap.js');
@@ -42,6 +44,17 @@ onmessage = async (e) => {
     M.HEAPU8.set(rom, p);
     if (M._port_set_rom(p, rom.length) !== 0) throw new Error('port_set_rom failed');
     M._free(p);
+    if (cfg.save) {
+      const sv = new Uint8Array(await (await fetch('/save')).arrayBuffer());
+      const q = M._malloc(sv.length);
+      M.HEAPU8.set(sv, q);
+      M._port_save_load(q, sv.length);
+      M._free(q);
+    }
+    const saveDump = async () => {
+      const q = M._port_flash_image() >>> 0;
+      await fetch(`/save?gen=${M._port_flash_generation() >>> 0}`, { method: 'POST', body: M.HEAPU8.slice(q, q + M._rtw_save_size()) });
+    };
     if (cfg.readback) M._port_rb_record(1);
     const rc = M.callMain(cfg.args || []);
     print(`[web] main returned ${rc}; ${cfg.frames} retraces, pace ${cfg.pace}`);
@@ -55,6 +68,7 @@ onmessage = async (e) => {
       if (lo) M._port_gfx_set_log_ops(1);
       M._port_vi_retrace();
       if (lo) M._port_gfx_set_log_ops(0);
+      if (M._port_save_poll()) await saveDump();
       if (shots.has(f)) {
         M._port_gfx_log_stats();
         const blob = await canvas.convertToBlob({ type: 'image/png' });
