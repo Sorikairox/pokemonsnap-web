@@ -51,6 +51,8 @@ var ENVIRONMENT_IS_SHELL = false;
   let lastHost = -1e9;     // performance.now() of the last display frame
   let timer = 0, queued = false, paused = false, running = false;
   let want = null;         // canvas size asked by rtw_resize, applied before the next retrace
+  let view = null;         // the last rtw_resize [w, h, dpr]; sharp: the present mode the canvas was sized for (F2)
+  let sharp = 0;
   const st = { retraces: 0, host: 0, timerFired: 0, timerRan: 0, late: 0, t0: 0 };
   const log = (s) => { try { (Module['print'] || console.log)(s); } catch (e) { /* */ } };
 
@@ -74,6 +76,9 @@ var ENVIRONMENT_IS_SHELL = false;
     if (!next) next = now;
     if (now - next > FIELD_MS) st.late++;
     next = Math.max(next + FIELD_MS, now - FIELD_MS);   // catch up at most one field, then follow the display
+    // F2: option 2 "Pixels" (or the Options menu's live preview) changed: size the canvas for the new mode
+    const sh = Module['_port_display_sharp'] ? Module['_port_display_sharp']() : 0;
+    if (sh !== sharp) { sharp = sh; if (view) want = fit(view[0], view[1], view[2]); }
     if (want) {
       const c = Module['canvas'];
       if (c && (c.width !== want[0] || c.height !== want[1])) { c.width = want[0]; c.height = want[1]; log(`rtw: canvas ${c.width}x${c.height}`); }
@@ -89,6 +94,20 @@ var ENVIRONMENT_IS_SHELL = false;
       st.t0 = now;
     }
     arm();
+  }
+  // Smooth (option 2 = 0): 4:3 like the console's picture (the host fits it with object-fit: contain), at least 320x240
+  // and at most 1280x960 (as before F2). Sharp: the view's own shape and size in device pixels (at most 4096 a side),
+  // so the host shows the canvas 1:1 and the browser adds no smoothing of its own; vi_frame letterboxes the 4:3
+  // picture inside it.
+  function fit(w, h, dpr) {
+    const k = Math.max(1, dpr | 0) / 100;
+    if (sharp) {
+      const s = Math.min(1, 4096 / Math.max(w * k, h * k));
+      return [Math.max(320, Math.round(w * k * s)), Math.max(240, Math.round(h * k * s))];
+    }
+    let cw = Math.min(w * k, h * k * 4 / 3);
+    cw = Math.max(320, Math.min(1280, Math.round(cw / 4) * 4));
+    return [cw, cw * 3 / 4];
   }
   Module['rtwLoop'] = {
     start() {
@@ -115,13 +134,10 @@ var ENVIRONMENT_IS_SHELL = false;
       else arm();
       log(`rtw: ${paused ? 'paused' : 'resumed'} at retrace ${st.retraces}`);
     },
-    // the canvas follows the view (CSS px x devicePixelRatio), 4:3 like the console's picture (the host fits it with
-    // object-fit: contain), at least 320x240 and at most 1280x960; render-only (the N64 images stay at 320x240)
+    // the canvas follows the view (CSS px x devicePixelRatio); render-only (the N64 images stay at 320x240)
     resize(w, h, dpr) {
-      const k = Math.max(1, dpr | 0) / 100;
-      let cw = Math.min(w * k, h * k * 4 / 3);
-      cw = Math.max(320, Math.min(1280, Math.round(cw / 4) * 4));
-      want = [cw, cw * 3 / 4];
+      view = [w, h, dpr];
+      want = fit(w, h, dpr);
     },
   };
 })();
@@ -1428,6 +1444,10 @@ async function createWasm() {
   
     };
 
+  var _glBindRenderbuffer = (target, renderbuffer) => {
+      GLctx.bindRenderbuffer(target, GL.renderbuffers[renderbuffer]);
+    };
+
   var _glBindTexture = (target, texture) => {
       GLctx.bindTexture(target, GL.textures[texture]);
     };
@@ -1564,6 +1584,11 @@ async function createWasm() {
       GLctx.enableVertexAttribArray(index);
     };
 
+  var _glFramebufferRenderbuffer = (target, attachment, renderbuffertarget, renderbuffer) => {
+      GLctx.framebufferRenderbuffer(target, attachment, renderbuffertarget,
+                                         GL.renderbuffers[renderbuffer]);
+    };
+
   var _glFramebufferTexture2D = (target, attachment, textarget, texture, level) => {
       GLctx.framebufferTexture2D(target, attachment, textarget,
                                       GL.textures[texture], level);
@@ -1576,6 +1601,11 @@ async function createWasm() {
 
   var _glGenFramebuffers = (n, ids) => {
       GL.genObject(n, ids, 'createFramebuffer', GL.framebuffers
+        );
+    };
+
+  var _glGenRenderbuffers = (n, renderbuffers) => {
+      GL.genObject(n, renderbuffers, 'createRenderbuffer', GL.renderbuffers
         );
     };
 
@@ -1961,6 +1991,8 @@ async function createWasm() {
       }
     };
 
+  var _glRenderbufferStorage = (x0, x1, x2, x3) => GLctx.renderbufferStorage(x0, x1, x2, x3);
+
   var _glScissor = (x0, x1, x2, x3) => GLctx.scissor(x0, x1, x2, x3);
 
   var _glShaderSource = (shader, count, string, length) => {
@@ -2172,6 +2204,7 @@ if (Module['wasmBinary']) wasmBinary = Module['wasmBinary'];
 var _port_option_get,
   _free,
   _malloc,
+  _port_display_sharp,
   _port_option_set,
   _port_thread_dump,
   _port_set_pad,
@@ -2327,6 +2360,7 @@ function assignWasmExports(wasmExports) {
   Module['_port_option_get'] = _port_option_get = wasmExports['port_option_get'];
   _free = wasmExports['free'];
   _malloc = wasmExports['malloc'];
+  Module['_port_display_sharp'] = _port_display_sharp = wasmExports['port_display_sharp'];
   Module['_port_option_set'] = _port_option_set = wasmExports['port_option_set'];
   Module['_port_thread_dump'] = _port_thread_dump = wasmExports['port_thread_dump'];
   Module['_port_set_pad'] = _port_set_pad = wasmExports['port_set_pad'];
@@ -2509,6 +2543,8 @@ var wasmImports = {
   /** @export */
   glBindFramebuffer: _glBindFramebuffer,
   /** @export */
+  glBindRenderbuffer: _glBindRenderbuffer,
+  /** @export */
   glBindTexture: _glBindTexture,
   /** @export */
   glBindVertexArray: _glBindVertexArray,
@@ -2555,11 +2591,15 @@ var wasmImports = {
   /** @export */
   glEnableVertexAttribArray: _glEnableVertexAttribArray,
   /** @export */
+  glFramebufferRenderbuffer: _glFramebufferRenderbuffer,
+  /** @export */
   glFramebufferTexture2D: _glFramebufferTexture2D,
   /** @export */
   glGenBuffers: _glGenBuffers,
   /** @export */
   glGenFramebuffers: _glGenFramebuffers,
+  /** @export */
+  glGenRenderbuffers: _glGenRenderbuffers,
   /** @export */
   glGenTextures: _glGenTextures,
   /** @export */
@@ -2584,6 +2624,8 @@ var wasmImports = {
   glReadBuffer: _glReadBuffer,
   /** @export */
   glReadPixels: _glReadPixels,
+  /** @export */
+  glRenderbufferStorage: _glRenderbufferStorage,
   /** @export */
   glScissor: _glScissor,
   /** @export */

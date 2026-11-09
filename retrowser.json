@@ -12,19 +12,19 @@
   "files": {
     "wasm": {
       "path": "pokemonsnap.wasm",
-      "sha256": "c0ff34fc06ea77e92860f3a5055c724d68de4eafb26feaf551507626831976bb",
-      "size": 6421431
+      "sha256": "55a944d337d7ced9731ec2c823add5bd727e38181a5cf07a74833f342d2c3a73",
+      "size": 6427967
     },
     "js": {
       "path": "pokemonsnap.js",
-      "sha256": "abff83a452cd786220bd5f883a4426be24cf05181178d8e5f00356ca2eca0281",
-      "size": 98828,
+      "sha256": "ccff51b2f4d917213b1d6209e26e4d2d4f543e7ed61c785ce8dab7db80ed9ef0",
+      "size": 100752,
       "factory": "createPokemonSnap"
     },
     "data": [
       {
         "path": "pokemonsnap.romfill",
-        "sha256": "ef97aeb0055294ecfcc989ffb2add97ba185d684549de51fa2574a61ab210fe2",
+        "sha256": "df59a69662a7ed8c665943b29ce3aab874f513b3351f194b20478673f5c8d26b",
         "size": 5536
       }
     ]
@@ -49,6 +49,13 @@
       "label": "Snap button",
       "type": "bool",
       "default": 1,
+      "inGame": true
+    },
+    {
+      "id": 2,
+      "label": "Sharp pixels",
+      "type": "bool",
+      "default": 0,
       "inGame": true
     }
   ],
