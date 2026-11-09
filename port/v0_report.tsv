@@ -196,6 +196,7 @@ src/app_level/player.c	mainCameraRender	global	0	call:PokemonDetector_ProcessIma
 src/app_level/player.c	mainCameraSetScissor	global	0	set	void (a value read reads 0): console v0 not only a call result (set)
 src/app_level/player.c	mainCameraUpdate	global	0	call:cmdProcessCommands	returns v0: cmdProcessCommands
 src/app_level/player.c	playDashEngineSounds	global	0	call:auPlaySound;entry	void (a value read reads 0): console v0 not only a call result (entry)
+src/app_level/player.c	port_motionAim	static	0	-	void (a value read reads 0): no IDO object row
 src/app_level/player.c	processBump	global	0	call:omEndProcess	void (a value read reads 0): a callee does not leave a value in v0 (omEndProcess)
 src/app_level/player.c	processOutOfFilm	global	0	call:omEndProcess	void (a value read reads 0): a callee does not leave a value in v0 (omEndProcess)
 src/app_level/player.c	processTurnToDirection	global	0	call:ohPauseProcessByFunction;set	void (a value read reads 0): console v0 not only a call result (set)

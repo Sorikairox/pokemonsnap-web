@@ -420,8 +420,80 @@ void handleItemButtonsPress(GObj* obj) {
     }
 }
 
+#ifdef PORT
+/* port (F3, motion aim): the device's rotation since the last game frame (port/ultra/pc_options.c port_motion_take,
+ * 1/1024 degree; yaw > 0 turn right, pitch > 0 look up) turns the view by exactly that angle, before the stick acts.
+ * Yaw: PlayerViewYaw. Zoomed out it is relative to the facing (CurrentDirectionYaw); past +-0.3 pi the facing changes
+ * by a quarter turn, as updateCameraZoomedOut does for the stick but without its snap to -+0.2 pi, so no rotation is
+ * lost. Zoomed in it is relative to the cart, in [0, TAU). Pitch: ViewPitch, kept within the game's MinPitch..MaxPitch
+ * (setPitchLimits); past a limit the view stops there. "Control Stick Setup" (IsAxisYInverted) is a stick setting and
+ * is not applied: tilting the phone up always looks up. Held while zooming in or out and during a zoomed-in C-button
+ * turn (applied when it ends), dropped while input is disabled. */
+int port_motion_take(s32 mode);
+int port_motion_pitch(void);
+static void port_motionAim(void) {
+    s32 yawUnits;
+    s32 pitchUnits;
+    f32 yaw;
+    f32 pitch;
+
+    if (IsInputDisabled || IsPaused) {
+        port_motion_take(2);
+        return;
+    }
+    if (gDirectionIndex < -1 || (gDirectionIndex == -1 && (TargetDirectionZoomedIn != 0 || D_80382D08_523118 != 0))) {
+        port_motion_take(1);
+        return;
+    }
+    yawUnits = port_motion_take(0);
+    pitchUnits = port_motion_pitch();
+    if (yawUnits == 0 && pitchUnits == 0) {
+        return;
+    }
+    yaw = yawUnits * (PI / (180.0f * 1024.0f));
+    pitch = pitchUnits * (PI / (180.0f * 1024.0f));
+
+    if (pitch > 0.0f && ViewPitch < MaxPitch) {
+        ViewPitch += pitch;
+        if (ViewPitch > MaxPitch) {
+            ViewPitch = MaxPitch;
+        }
+    } else if (pitch < 0.0f && ViewPitch > MinPitch) {
+        ViewPitch += pitch;
+        if (ViewPitch < MinPitch) {
+            ViewPitch = MinPitch;
+        }
+    }
+
+    PlayerViewYaw += yaw;
+    if (gDirectionIndex >= 0) {
+        while (PlayerViewYaw > 0.3f * PI) {
+            gDirectionIndex = (gDirectionIndex + 1) & 3;
+            PlayerViewYaw -= PI / 2;
+            CurrentDirectionYaw = DirectionsList[gDirectionIndex];
+        }
+        while (PlayerViewYaw < -0.3f * PI) {
+            gDirectionIndex = (gDirectionIndex + 3) & 3;
+            PlayerViewYaw += PI / 2;
+            CurrentDirectionYaw = DirectionsList[gDirectionIndex];
+        }
+    } else {
+        while (PlayerViewYaw >= TAU) {
+            PlayerViewYaw -= TAU;
+        }
+        while (PlayerViewYaw < 0.0f) {
+            PlayerViewYaw += TAU;
+        }
+    }
+}
+#endif
+
 void handleAnalogStick(GObj* obj) {
     DObj* model = obj->data.dobj;
+
+#ifdef PORT
+    port_motionAim();
+#endif
 
     if (ABS(gContInputStickX) >= 6 && !IsInputDisabled) {
         StickXValue = (f32) gContInputStickX / 80.0;

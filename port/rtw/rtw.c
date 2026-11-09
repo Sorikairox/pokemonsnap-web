@@ -222,6 +222,23 @@ EMSCRIPTEN_KEEPALIVE int rtw_input(int port, int buttons, int sx, int sy) {
     return 0;
 }
 
+/* F3, motion aim (manifest controls.motion): the device's rotation since the previous call in 1/1024 degree, already
+ * turned to the screen's orientation (yaw > 0: turned right, pitch > 0: tilted up). The host calls it at most once
+ * per display frame, just before rtw_input, and only while the player has "Motion aim" on in the host's menu. Summed
+ * for the game (pc_options.c port_motion_add), which applies it while the player controls the camera. */
+void port_motion_add(int yaw, int pitch);
+static int motion_logged;
+EMSCRIPTEN_KEEPALIVE int rtw_motion(int port, int yaw, int pitch) {
+    if (port != 0) return 0; /* one controller */
+    if (!motion_logged && (yaw || pitch)) {
+        motion_logged = 1;
+        logf_("rtw: motion aim: first rotation from the host (yaw %d, pitch %d / 1024 degree, retrace %u)", yaw, pitch,
+              port_vi_count);
+    }
+    if (started) port_motion_add(yaw, pitch);
+    return 0;
+}
+
 /* options (standard 4.7, F1): every option of retrowser.json is "inGame" (the game's Options menu shows it); the host
  * calls rtw_option for each at start-up with the value it remembers and is told of every change from the menu */
 int port_option_set(int id, int value);

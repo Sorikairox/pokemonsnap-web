@@ -27,7 +27,14 @@
  * Not zoomed: zoom in (Z held / one Z press, as the Snap button), wait until updateCameraZoomedIn reports that A takes
  * a picture now (port_snap_shoot_ready) for SHUTTER_READY_FRAMES game frames, press A once, zoom back out. Already
  * zoomed in: only the A press. A tap while a sequence runs, while zooming, or outside camera control is ignored
- * (logged), never queued: a queued tap would fire at a moment the player did not choose. */
+ * (logged), never queued: a queued tap would fire at a moment the player did not choose.
+ *
+ * Motion aim (session F3): the host's rtw_motion deltas (port/rtw/rtw.c; harness --motion) are summed here for pad 0
+ * (port_motion_add, 1/1024 degree) and taken by app_level/player.c every game frame while the player controls the
+ * camera (port_motion_take, #ifdef PORT in handleAnalogStick), which turns the view by exactly that angle. Motion that
+ * arrives while player.c does not take it (menus, pause, cut-scenes, C-button turns) is dropped. No port option: the
+ * host's "Motion aim" toggle (default off, it owns the permission prompt) is the only switch; with it off no motion
+ * arrives and nothing changes. */
 #include "pc_os.h"
 #include <emscripten.h>
 #include <stdlib.h>
@@ -208,6 +215,69 @@ int port_pad_filter(int buttons) {
     }
     return out;
 }
+
+/* ---------------------------------------------------------------- motion aim (F3) */
+/* Sums of the host's deltas not yet taken by the game, in 1/1024 degree (yaw > 0: turn right, pitch > 0: look up).
+ * Held to +-90 degrees: a host that keeps sending while the game holds the motion (zooming) cannot wind it up. */
+#define MOTION_MAX (90 * 1024)
+static int motion_yaw, motion_pitch, motion_latched_pitch;
+static unsigned motion_taken = 0xFFFFFFF0u; /* retrace of player.c's last port_motion_take (any mode) */
+static int motion_active;                    /* motion is reaching the camera (for the log) */
+static long long motion_sum_yaw, motion_sum_pitch, motion_dropped;
+static unsigned motion_frames;
+
+static int motion_clamp(int v) { return v > MOTION_MAX ? MOTION_MAX : v < -MOTION_MAX ? -MOTION_MAX : v; }
+static long long iabs(long long v) { return v < 0 ? -v : v; }
+
+static void motion_report(const char *why) {
+    port_log("[motion] %s at retrace %u: %u game frames turned the view by yaw %+.2f, pitch %+.2f degrees (before the "
+             "game's pitch limits); %.2f degrees dropped outside camera control\n", why, port_vi_count, motion_frames,
+             motion_sum_yaw / 1024.0, motion_sum_pitch / 1024.0, motion_dropped / 1024.0);
+    motion_sum_yaw = motion_sum_pitch = motion_dropped = 0;
+    motion_frames = 0;
+}
+
+/* the host (rtw_motion, port 0; harness --motion): the device's rotation since the previous call */
+EMSCRIPTEN_KEEPALIVE void port_motion_add(int yaw, int pitch) {
+    if (port_vi_count - motion_taken > SNAP_STALE) { /* the camera is not the player's: drop */
+        motion_dropped += iabs(yaw) + iabs(pitch);
+        if (motion_active) {
+            motion_active = 0;
+            motion_report("camera control ended");
+        }
+        motion_yaw = motion_pitch = 0;
+        return;
+    }
+    motion_yaw = motion_clamp(motion_yaw + yaw);
+    motion_pitch = motion_clamp(motion_pitch + pitch);
+}
+
+/* app_level/player.c handleAnalogStick, every game frame (#ifdef PORT). mode 0: take the motion (returns the yaw;
+ * port_motion_pitch then gives the pitch; 1/1024 degree); 1: keep it for a later frame (zooming in or out, a C-button
+ * turn while zoomed in); 2: drop it (input disabled) */
+int port_motion_take(int mode) {
+    int yaw = 0;
+    if (port_vi_count - motion_taken > SNAP_STALE) motion_yaw = motion_pitch = 0; /* from before camera control */
+    motion_taken = port_vi_count;
+    motion_latched_pitch = 0;
+    if (mode == 2) {
+        motion_dropped += iabs(motion_yaw) + iabs(motion_pitch);
+        motion_yaw = motion_pitch = 0;
+    } else if (mode == 0 && (motion_yaw || motion_pitch)) {
+        yaw = motion_yaw;
+        motion_latched_pitch = motion_pitch;
+        motion_yaw = motion_pitch = 0;
+        if (!motion_active) {
+            motion_active = 1;
+            port_log("[motion] turning the camera from retrace %u\n", port_vi_count);
+        }
+        motion_sum_yaw += yaw;
+        motion_sum_pitch += motion_latched_pitch;
+        if (++motion_frames >= 600) motion_report("so far");
+    }
+    return yaw;
+}
+int port_motion_pitch(void) { return motion_latched_pitch; }
 
 /* ---------------------------------------------------------------- the Options menu row (src/main_menu, #ifdef PORT) */
 /* The game's 12-pixel font (4 bits per pixel, 12 x 12, 370 glyphs in UIText_CharTable order) lives in the window

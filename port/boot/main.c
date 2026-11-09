@@ -100,7 +100,7 @@ int port_debug_start_scene(int scene) {
 }
 
 int main(int argc, char **argv) {
-    int frames = 0, bench = 0, tap_every = 0, tap_mask = 0, tap_end = 0, inputs[64][5], n_inputs = 0, logops[8], n_logops = 0, tdump[8], n_tdump = 0;
+    int frames = 0, bench = 0, tap_every = 0, tap_mask = 0, tap_end = 0, inputs[64][5], n_inputs = 0, motion[64][4], n_motion = 0, logops[8], n_logops = 0, tdump[8], n_tdump = 0;
     port_log("[boot] Pokemon Snap wasm port (S3a); RDRAM mirror at %p\n", (void *)n64_rdram);
     if (!port_rom_ready()) {
         port_log("[boot] no ROM: call port_set_rom(ptr, size) before main\n");
@@ -125,6 +125,16 @@ int main(int argc, char **argv) {
             tdump[n_tdump++] = atoi(argv[++i]);
         } else if (!strcmp(argv[i], "--logops") && i + 1 < argc && n_logops < 8) { /* log that retrace's commands */
             logops[n_logops++] = atoi(argv[++i]);
+        } else if (!strcmp(argv[i], "--motion") && i + 1 < argc) { /* --motion F:YAW:PITCH[:LEN],...: as run.mjs (F3) */
+            for (char *p = argv[++i]; *p && n_motion < 64;) {
+                motion[n_motion][0] = (int)strtol(p, &p, 0);
+                motion[n_motion][1] = *p == ':' ? (int)strtol(p + 1, &p, 0) : 0;
+                motion[n_motion][2] = *p == ':' ? (int)strtol(p + 1, &p, 0) : 0;
+                motion[n_motion][3] = *p == ':' ? (int)strtol(p + 1, &p, 0) : 1;
+                n_motion++;
+                while (*p && *p != ',') p++;
+                if (*p == ',') p++;
+            }
         } else if (!strcmp(argv[i], "--input") && i + 1 < argc) { /* --input F:MASK[:LEN[:X[:Y]]],...: as run.mjs */
             for (char *p = argv[++i]; *p && n_inputs < 64;) {
                 inputs[n_inputs][0] = (int)strtol(p, &p, 0);
@@ -158,6 +168,13 @@ int main(int argc, char **argv) {
                 pad |= inputs[k][1];
                 if (inputs[k][3] || inputs[k][4]) { sx = inputs[k][3]; sy = inputs[k][4]; }
             }
+        int my = 0, mp = 0; /* F3: motion aim, before the pad as the retrowser host does */
+        for (int k = 0; k < n_motion; k++)
+            if (f >= motion[k][0] && f < motion[k][0] + motion[k][3]) {
+                my += motion[k][1];
+                mp += motion[k][2];
+            }
+        if (my || mp) { void port_motion_add(int yaw, int pitch); port_motion_add(my, mp); }
         port_set_pad(0, pad, sx, sy);
         int lo = 0;
         for (int k = 0; k < n_logops; k++) lo |= logops[k] == f;

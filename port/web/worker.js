@@ -5,6 +5,8 @@
 //   cfg.tap     [every, mask]: press mask for 3 retraces every `every` (same rule as node's --tap)
 //   cfg.input   [[frame, mask, length, x, y], ...]: press mask (and hold the stick at x, y) from retrace `frame`
 //               for `length` retraces
+//   cfg.motion  (F3) [[frame, yaw, pitch, length], ...]: port_motion_add(yaw, pitch) before each retrace from `frame`
+//               for `length` (default 1) retraces, as the retrowser host's rtw_motion before rtw_input
 //   cfg.tapEnd  no taps from this retrace on (0: never stop)
 //   cfg.logops  [frame, ...]: log every display-list command of the tasks run during that retrace ([gfx] lines)
 //   cfg.pace    'fast' (as fast as the worker runs, one event-loop turn per retrace: deterministic screenshots) or
@@ -71,6 +73,9 @@ onmessage = async (e) => {
     let tl = t0;
     for (let f = 1; f <= cfg.frames; f++) {
       const [mask, sx, sy] = padAt(cfg, f);
+      let my = 0, mp = 0;   // F3: motion aim
+      for (const [at, y, p, len] of cfg.motion || []) if (f >= at && f < at + (len || 1)) { my += y || 0; mp += p || 0; }
+      if (my || mp) M._port_motion_add(my, mp);
       M._port_set_pad(0, mask, sx, sy);
       const lo = (cfg.logops || []).includes(f);
       if (lo) M._port_gfx_set_log_ops(1);
