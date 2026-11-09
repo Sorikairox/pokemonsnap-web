@@ -501,7 +501,7 @@ void func_800E6880_A0DE10(void) {
     sobj->sprite.attr = SP_TEXSHUF | SP_HIDDEN | SP_TRANSPARENT;
 }
 
-void func_800E6ADC_A0E06C(void) {
+void OptionsMenu_CreateSprites(void) { /* was func_800E6ADC_A0E06C */
     func_800E5F48_A0D4D8();
     func_800E5FDC_A0D56C();
     func_800E61C8_A0D758();
@@ -514,9 +514,9 @@ void func_800E6ADC_A0E06C(void) {
 #endif
 }
 
-s32 func_800E6B2C_A0E0BC(void) {
-    func_800E6ADC_A0E06C();
-    func_800E7F98_A0F528();
+s32 OptionsMenu_Main(void) { /* was func_800E6B2C_A0E0BC */
+    OptionsMenu_CreateSprites();
+    OptionsMenu_Run();
     omDeleteGObj(D_800E8334_A0F8C4);
     omDeleteGObj(D_800E8338_A0F8C8);
     omDeleteGObj(D_800E833C_A0F8CC);

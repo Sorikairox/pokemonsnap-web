@@ -210,7 +210,7 @@ void func_800E6F68_A0E4F8(void) {
     ohWait(1);
 }
 
-void func_800E71DC_A0E76C(void) {
+void OptionsMenu_InitValues(void) { /* was func_800E71DC_A0E76C */
     SObj* sobj;
     s8 i;
 
@@ -321,7 +321,7 @@ void func_800E7478_A0EA08(GObj* arg0) {
     }
 }
 
-void func_800E7604_A0EB94(GObj* arg0) {
+void OptionsMenu_ShowRowHelp(GObj* arg0) { /* was func_800E7604_A0EB94 */
     UNUSED s32 pad;
     SObj* sobj;
     s8 var_s1;
@@ -352,7 +352,7 @@ void func_800E7604_A0EB94(GObj* arg0) {
     }
 }
 
-s8 func_800E7700_A0EC90(void) {
+s8 OptionsMenu_ChooseRow(void) { /* was func_800E7700_A0EC90 */
     UNUSED s32 pad;
     GObj* gobj;
     UnkStruct800BEDF8* temp_v0_2;
@@ -361,7 +361,7 @@ s8 func_800E7700_A0EC90(void) {
 
     gobj = omAddGObj(0xE, NULL, 0, 0x80000000);
     omCreateProcess(gobj, func_800E7478_A0EA08, 0, 1);
-    omCreateProcess(gobj, func_800E7604_A0EB94, 0, 1);
+    omCreateProcess(gobj, OptionsMenu_ShowRowHelp, 0, 1);
     ohWait(1);
 
     while (true) {
@@ -417,7 +417,7 @@ s8 func_800E7700_A0EC90(void) {
     return 4;
 }
 
-void func_800E7950_A0EEE0(GObj* arg0) {
+void OptionsMenu_BlinkValue(GObj* arg0) { /* was func_800E7950_A0EEE0 */
     u8 color;
     u8 state;
     u8 var_s0;
@@ -488,7 +488,7 @@ void func_800E7950_A0EEE0(GObj* arg0) {
     }
 }
 
-void func_800E7B24_A0F0B4(GObj* arg0) {
+void OptionsMenu_ShowValueHelp(GObj* arg0) { /* was func_800E7B24_A0F0B4 */
     s8 var_s2;
     SObj* var_v0;
     SObj* sp38[2];
@@ -523,7 +523,7 @@ void func_800E7B24_A0F0B4(GObj* arg0) {
     }
 }
 
-void func_800E7C40_A0F1D0(void) {
+void OptionsMenu_EditRow(void) { /* was func_800E7C40_A0F1D0 */
     u8 setting;
     u8 settingInv;
     GObj* gobj;
@@ -555,8 +555,8 @@ void func_800E7C40_A0F1D0(void) {
     sp44[0] = sobj;
     sp44[1] = sobj->next;
     gobj = omAddGObj(0xE, NULL, 0, 0x80000000);
-    omCreateProcess(gobj, func_800E7950_A0EEE0, 0, 1);
-    omCreateProcess(gobj, func_800E7B24_A0F0B4, 0, 1);
+    omCreateProcess(gobj, OptionsMenu_BlinkValue, 0, 1);
+    omCreateProcess(gobj, OptionsMenu_ShowValueHelp, 0, 1);
     setting = D_800E8375_A0F905;
     ohWait(1);
 
@@ -619,18 +619,18 @@ void func_800E7C40_A0F1D0(void) {
     ohWait(1);
 }
 
-void func_800E7F98_A0F528(void) {
+void OptionsMenu_Run(void) { /* was func_800E7F98_A0F528 */
     s32 cond;
     u32 temp_v0;
 
-    func_800E71DC_A0E76C();
+    OptionsMenu_InitValues();
     func_800E7408_A0E998();
     auSetBGMVolume(0, 0x7F00);
     auPlaySong(0, 0x1B);
 
     do {
         cond = false;
-        temp_v0 = func_800E7700_A0EC90();
+        temp_v0 = OptionsMenu_ChooseRow();
         switch (temp_v0) {
             case 0:
                 func_800E6F68_A0E4F8();
@@ -641,7 +641,7 @@ void func_800E7F98_A0F528(void) {
 #ifdef PORT
             case PORT_ROW_SNAP:
 #endif
-                func_800E7C40_A0F1D0();
+                OptionsMenu_EditRow();
                 break;
             case 4:
                 func_800BFB90_5CA30(viEdgeOffsetLeft, viEdgeOffsetTop);

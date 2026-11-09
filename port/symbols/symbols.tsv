@@ -219,7 +219,7 @@ magnemite_tex_screw_thread_frame2_pal	8015DE48	1A3FA8	20	data	global	.tunnel_ass
 magmar_part9_draw_near	803223C8	7735C8	220	data	global	.volcano_code	volcano_code	build/src/volcano/magmar/model.c.o
 D_801095B0_8CEDD0	801095B0	8CEDD0	408	data	global	.oaks_lab	oaks_lab	build/asm/data/oaks_lab/8AC010.data.s.o
 charmeleon_part15_pre_near	8033DDB0	78EFB0	68	data	global	.volcano_code	volcano_code	build/src/volcano/charmeleon/model.c.o
-func_800E6B2C_A0E0BC	800E6B2C	A0E0BC	BC	func	global	.main_menu	main_menu	build/src/main_menu/A0D4D0.c.o
+OptionsMenu_Main	800E6B2C	A0E0BC	BC	func	global	.main_menu	main_menu	build/src/main_menu/A0D4D0.c.o
 pikachu_tex_eye4_png	80108B68	85F88	400	data	global	.pikachu1	pikachu1	build/src/pokemon_common/pikachu/textures.c.o
 main_ROM_START	1000	-	0	none	global	abs	-	-
 electabuzz_hd_part13_pre	8019A740	1E0880	38	data	global	.tunnel_extra	tunnel_extra	build/src/tunnel/electabuzz/model_hd.c.o
@@ -1778,7 +1778,7 @@ D_80206B80_9CC3A0	80206B80	-	4	data	global	.oaks_lab_bss	oaks_lab	build/src/oaks
 staryu_part5_draw	8032A9E0	803F70	28	data	global	.valley_code	valley_code	build/src/valley/staryu/model.c.o
 growlithe_part0_draw_near	80332B08	783D08	168	data	global	.volcano_code	volcano_code	build/src/volcano/growlithe/model.c.o
 func_802DCBB8_6C4998	802DCBB8	6C4998	B4	func	global	.river_code	river_code	build/src/river/6C3980.c.o
-func_800E7950_A0EEE0	800E7950	A0EEE0	1D4	func	global	.main_menu	main_menu	build/src/main_menu/A0E190.c.o
+OptionsMenu_BlinkValue	800E7950	A0EEE0	1D4	func	global	.main_menu	main_menu	build/src/main_menu/A0E190.c.o
 goldeen_first	80347D20	8212B0	30	data	global	.valley_code	valley_code	build/src/valley/goldeen/model.c.o
 electrode_tex_explosion2_code	801799C8	1BFB28	200	data	global	.tunnel_assets	tunnel_assets	build/src/tunnel/electrode/textures.c.o
 D_800BE1EC	800BE1EC	-	4	data	global	.app_render_bss	app_render	build/src/app_render/effect.c.o
@@ -3863,7 +3863,7 @@ D_camera_check_80249AA4	80249AA4	-	4	data	global	abs	-	-
 D_800BE1E8	800BE1E8	-	4	data	global	.app_render_bss	app_render	build/src/app_render/effect.c.o
 rapidash_hd_part20_mat0	801B30D0	3D9D30	78	data	global	.volcano_extra	volcano_extra	build/src/volcano/rapidash/model_hd.c.o
 D_80380BD4_854384.NON_MATCHING	80380BD4	854384	1	data	global	.window	window	build/asm/data/window/852920.data.s.o
-func_800E7B24_A0F0B4	800E7B24	A0F0B4	11C	func	global	.main_menu	main_menu	build/src/main_menu/A0E190.c.o
+OptionsMenu_ShowValueHelp	800E7B24	A0F0B4	11C	func	global	.main_menu	main_menu	build/src/main_menu/A0E190.c.o
 _binary_assets_audio_bank2_bin_end	803C1470	BB6940	0	none	global	.audio_bank2	audio_bank2	build/assets/audio/bank2.bin.o
 _binary_build_assets_main_menu_vpk0_Vpk0_vpk0_end	803F5B86	A5CC46	0	none	global	.main_menu_vpk0	main_menu_vpk0	build/assets/main_menu_vpk0.Vpk0.o
 pikachu_part6_pre	8034ABF8	550BF8	28	data	global	.pikachu_model	pikachu_model	build/src/pokemon_common/pikachu/model.c.o
@@ -4353,7 +4353,7 @@ D_801E542C_994E9C.NON_MATCHING	801E542C	994E9C	1	data	global	.photo_check	photo_
 D_8034ACA0_82A410	8034ACA0	82A410	4	data	global	.rainbow_code	rainbow_code	build/src/rainbow/mew/code.c.o
 growlithe_part9_draw_near	80334BB8	785DB8	130	data	global	.volcano_code	volcano_code	build/src/volcano/growlithe/model.c.o
 bulbasaur_model_hd_ROM_END	83D730	-	0	none	global	abs	-	-
-func_800E71DC_A0E76C	800E71DC	A0E76C	22C	func	global	.main_menu	main_menu	build/src/main_menu/A0E190.c.o
+OptionsMenu_InitValues	800E71DC	A0E76C	22C	func	global	.main_menu	main_menu	build/src/main_menu/A0E190.c.o
 D_8039DDD0_53E1E0	8039DDD0	53E1E0	8	data	global	.app_level	app_level	build/asm/data/app_level/536030.data.s.o
 D_803A7698_547AA8.NON_MATCHING	803A7698	547AA8	1	data	global	.app_level	app_level	build/asm/data/app_level/536030.data.s.o
 victreebel_part3_draw_near	803388D0	6BAD80	A8	data	global	.cave_code	cave_code	build/src/cave/victreebel/model.c.o
@@ -10554,7 +10554,7 @@ vileplume_part13_draw_near	8032D990	715770	50	data	global	.river_code	river_code
 D_802D38A0_7ACE30	802D38A0	-	0	data	global	abs	-	-
 butterfree_part2_draw_near	8031A9B8	5B2A28	350	data	global	.beach_code	beach_code	build/src/beach/butterfree/model.c.o
 Pokemon_StepWalkInDirection	80360E78	501288	A4	func	global	.app_level	app_level	build/src/app_level/pokemon.c.o
-func_800E7700_A0EC90	800E7700	A0EC90	250	func	global	.main_menu	main_menu	build/src/main_menu/A0E190.c.o
+OptionsMenu_ChooseRow	800E7700	A0EC90	250	func	global	.main_menu	main_menu	build/src/main_menu/A0E190.c.o
 moltres_hd_part17_mat	801AEC64	3D58C4	C	data	global	.volcano_extra	volcano_extra	build/src/volcano/moltres/model_hd.c.o
 camera_check_VRAM_END	8024A1E0	A0FA00	0	data	global	.oaks_lab	oaks_lab	-
 D_8034B554_82ACC4	8034B554	82ACC4	3C	data	global	.rainbow_code	rainbow_code	build/asm/data/rainbow/82A640.data.s.o
@@ -12350,7 +12350,7 @@ growlithe_part2_draw	80333ED8	7850D8	28	data	global	.volcano_code	volcano_code	b
 func_802E13F4_6C91D4	802E13F4	6C91D4	38	func	global	.river_code	river_code	build/src/river/6C86E0.c.o
 D_801E8420_A060E0	801E8420	A060E0	200	data	global	.gallery	gallery	build/asm/data/gallery/9FF2E0.data.s.o
 __d_to_ull	8003D2D8	3DED8	A0	func	global	.main	main	build/ultralib/src/libc/llcvt.c.o
-func_800E7F98_A0F528	800E7F98	A0F528	134	func	global	.main_menu	main_menu	build/src/main_menu/A0E190.c.o
+OptionsMenu_Run	800E7F98	A0F528	134	func	global	.main_menu	main_menu	build/src/main_menu/A0E190.c.o
 pidgey_part1_draw	8033D9F8	5D5A68	28	data	global	.beach_code	beach_code	build/src/beach/pidgey/model.c.o
 D_802E2C44_6CAA24	802E2C44	-	0	data	global	abs	-	-
 vileplume_part7_draw	8032CF98	714D78	28	data	global	.river_code	river_code	build/src/river/vileplume/model.c.o
@@ -14272,7 +14272,7 @@ pikachu_hd_part2_mat1	803AD7B8	832B98	78	data	global	.pikachu_model_hd	pikachu_m
 D_803AB1C0_54B5D0	803AB1C0	-	DE0	data	global	.app_level_bss	app_level	build/src/app_level/player.c.o
 D_800F7CD0_8BD4F0	800F7CD0	8BD4F0	408	data	global	.oaks_lab	oaks_lab	build/asm/data/oaks_lab/8AC010.data.s.o
 D_802D3BC8_7AD158	802D3BC8	-	0	data	global	abs	-	-
-func_800E6ADC_A0E06C	800E6ADC	A0E06C	50	func	global	.main_menu	main_menu	build/src/main_menu/A0D4D0.c.o
+OptionsMenu_CreateSprites	800E6ADC	A0E06C	50	func	global	.main_menu	main_menu	build/src/main_menu/A0D4D0.c.o
 func_802ED7CC_5EA89C	802ED7CC	5EA89C	31C	func	global	.tunnel_code	tunnel_code	build/src/tunnel/pkmn_1014/code.c.o
 audio_seq_AF8A10_DATA_END	80303748	AF8C88	0	none	global	.audio_seq_AF8A10	audio_seq_AF8A10	build/assets/audio/seq/AF8A10.bin.o
 D_800FCD10_8C2530.NON_MATCHING	800FCD10	8C2530	1	data	global	.oaks_lab	oaks_lab	build/asm/data/oaks_lab/8AC010.data.s.o
@@ -14355,7 +14355,7 @@ font_lower_k	8038DEC0	52E2D0	D0	data	global	.app_level	app_level	build/src/app_l
 weepinbell_materials	8033AB80	6BD030	44	data	global	.cave_code	cave_code	build/src/cave/weepinbell/model.c.o
 D_803841B8_5245C8	803841B8	5245C8	10	data	global	.app_level	app_level	build/asm/data/app_level/icons.data.s.o
 slowbro_tex_80191FE0_png	80191FE0	-	0	data	global	abs	-	-
-func_800E7C40_A0F1D0	800E7C40	A0F1D0	358	func	global	.main_menu	main_menu	build/src/main_menu/A0E190.c.o
+OptionsMenu_EditRow	800E7C40	A0F1D0	358	func	global	.main_menu	main_menu	build/src/main_menu/A0E190.c.o
 rapidash_part17_draw_far	8032FD68	780F68	128	data	global	.volcano_code	volcano_code	build/src/volcano/rapidash/model.c.o
 album_SetCommentBackgroundColor	801DD4C0	9A7710	40	func	global	.pokemon_album	pokemon_album	build/src/pokemon_album/9A6F70.c.o
 D_camera_check_80203420	80203420	8A0C10	F58	data	global	.camera_check	camera_check	build/asm/data/camera_check/881900.data.s.o
@@ -18803,7 +18803,7 @@ D_801823D0_947BF0.NON_MATCHING	801823D0	947BF0	1	data	global	.oaks_lab	oaks_lab	
 Pause_ContinueSelected	80382C84	523094	4	data	global	.app_level	app_level	build/src/app_level/player.c.o
 porygon_part2_mat0	80327DA8	70FB88	78	data	global	.river_code	river_code	build/src/river/porygon/model.c.o
 sandslash_first	8033F068	8185F8	30	data	global	.valley_code	valley_code	build/src/valley/sandslash/model.c.o
-func_800E7604_A0EB94	800E7604	A0EB94	FC	func	global	.main_menu	main_menu	build/src/main_menu/A0E190.c.o
+OptionsMenu_ShowRowHelp	800E7604	A0EB94	FC	func	global	.main_menu	main_menu	build/src/main_menu/A0E190.c.o
 D_8039DDD8_53E1E8.NON_MATCHING	8039DDD8	53E1E8	1	data	global	.app_level	app_level	build/asm/data/app_level/536030.data.s.o
 D_8036C8D0_50CCE0.NON_MATCHING	8036C8D0	50CCE0	1	data	global	.app_level	app_level	build/asm/data/app_level/player.data.s.o
 lapras_part9_draw	80332708	5CA778	18	data	global	.beach_code	beach_code	build/src/beach/lapras/model.c.o

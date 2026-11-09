@@ -1239,7 +1239,7 @@ void func_800E4374_A0B904(s8 arg0) {
                     break;
                 case 8:
                     auStopBGM();
-                    D_800E82E4_A0F874 = func_800E6B2C_A0E0BC();
+                    D_800E82E4_A0F874 = OptionsMenu_Main();
                     break;
                 case 11:
                     auStopBGM();

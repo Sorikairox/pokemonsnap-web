@@ -1407,8 +1407,8 @@ src/main_menu/A0D4D0.c	func_800E643C_A0D9CC	2	0	set
 src/main_menu/A0D4D0.c	func_800E6480_A0DA10	1	1	call:func_800E643C_A0D9CC
 src/main_menu/A0D4D0.c	func_800E672C_A0DCBC	1	1	call:omGObjAddSprite
 src/main_menu/A0D4D0.c	func_800E6880_A0DE10	1	1	call:omGObjAddSprite
-src/main_menu/A0D4D0.c	func_800E6ADC_A0E06C	1	1	call:func_800E6880_A0DE10
-src/main_menu/A0D4D0.c	func_800E6B2C_A0E0BC	1	0	set
+src/main_menu/A0D4D0.c	OptionsMenu_CreateSprites	1	1	call:func_800E6880_A0DE10
+src/main_menu/A0D4D0.c	OptionsMenu_Main	1	0	set
 src/main_menu/A0E190.c	func_800E6C00_A0E190	1	0	entry
 src/main_menu/A0E190.c	func_800E6C14_A0E1A4	1	0	entry
 src/main_menu/A0E190.c	func_800E6C30_A0E1C0	1	0	entry
@@ -1417,15 +1417,15 @@ src/main_menu/A0E190.c	func_800E6C7C_A0E20C	1	1	call:ohWait
 src/main_menu/A0E190.c	func_800E6CF0_A0E280	1	1	call:ohWait
 src/main_menu/A0E190.c	func_800E6D64_A0E2F4	1	1	call:omGObjAddSprite
 src/main_menu/A0E190.c	func_800E6F68_A0E4F8	1	1	call:ohWait
-src/main_menu/A0E190.c	func_800E71DC_A0E76C	2	1	call:func_800E6C00_A0E190;call:func_800E6C14_A0E1A4
+src/main_menu/A0E190.c	OptionsMenu_InitValues	2	1	call:func_800E6C00_A0E190;call:func_800E6C14_A0E1A4
 src/main_menu/A0E190.c	func_800E7408_A0E998	1	1	call:ohWait
 src/main_menu/A0E190.c	func_800E7478_A0EA08	0	0	
-src/main_menu/A0E190.c	func_800E7604_A0EB94	0	0	
-src/main_menu/A0E190.c	func_800E7700_A0EC90	1	0	set
-src/main_menu/A0E190.c	func_800E7950_A0EEE0	0	0	
-src/main_menu/A0E190.c	func_800E7B24_A0F0B4	0	0	
-src/main_menu/A0E190.c	func_800E7C40_A0F1D0	1	1	call:ohWait
-src/main_menu/A0E190.c	func_800E7F98_A0F528	1	0	call:auStopBGM;jr
+src/main_menu/A0E190.c	OptionsMenu_ShowRowHelp	0	0	
+src/main_menu/A0E190.c	OptionsMenu_ChooseRow	1	0	set
+src/main_menu/A0E190.c	OptionsMenu_BlinkValue	0	0	
+src/main_menu/A0E190.c	OptionsMenu_ShowValueHelp	0	0	
+src/main_menu/A0E190.c	OptionsMenu_EditRow	1	1	call:ohWait
+src/main_menu/A0E190.c	OptionsMenu_Run	1	0	call:auStopBGM;jr
 src/menu_new_game/A5CC50.c	func_800E18A0_A5CC50	1	0	entry
 src/menu_new_game/A5CC50.c	func_800E18B4_A5CC64	1	0	set
 src/menu_new_game/A5CC50.c	func_800E18C4_A5CC74	1	0	entry
