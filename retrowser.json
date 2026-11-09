@@ -12,8 +12,8 @@
   "files": {
     "wasm": {
       "path": "pokemonsnap.wasm",
-      "sha256": "28edd509b7fcbe268bb38fde4d5dec1e8a0825e28cc76ea0615fdeafe4fba67b",
-      "size": 6437190
+      "sha256": "338ed2ac9e22c271bd81f5ecc369577b9153a85f6c441aedcae5c5265c645fc5",
+      "size": 6438199
     },
     "js": {
       "path": "pokemonsnap.js",
@@ -24,7 +24,7 @@
     "data": [
       {
         "path": "pokemonsnap.romfill",
-        "sha256": "298e979263c8ac93fb1a7a68c03fb565b7d5a820285807f409212c6773aac33d",
+        "sha256": "2410f64b7d89839a3034397f40fb345cd46eb686f6462bb22de59bd1268955b3",
         "size": 5536
       }
     ]
