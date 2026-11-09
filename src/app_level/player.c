@@ -219,6 +219,8 @@ void screenCoorsToWorld(f32*, f32*, f32*);
 void port_snap_course(s32 direction, s32 zoomSwitch, s32 ready);
 /* F4 (the Shutter): updateCameraZoomedIn, each zoomed-in frame: whether an A press takes a picture now */
 void port_snap_shoot_ready(s32 ready);
+/* the game took a picture (any A press that did; the film left after it): a log line for the tests */
+void port_snap_photo_taken(s32 filmLeft);
 #define PORT_SNAP_COURSE(ready) port_snap_course(gDirectionIndex, ZoomSwitchMode, (ready) && !IsPaused)
 #endif
 void BumpDetector_Init(void);
@@ -1488,6 +1490,9 @@ void updateCameraZoomedIn(GObj* obj) {
                     if (gHasPokemonInFocus && gPokemonInFocus != NULL) {
                         GET_POKEMON(gPokemonInFocus)->flags |= POKEMON_FLAG_80;
                     }
+#ifdef PORT
+                    port_snap_photo_taken(func_8035E508_4FE918());
+#endif
                     if (func_8035E52C_4FE93C() == 0) {
                         omCreateProcess(obj, processOutOfFilm, 0, 9);
                         omEndProcess(NULL);

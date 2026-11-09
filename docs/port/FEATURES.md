@@ -69,8 +69,10 @@ up), sent only while the player has turned "Motion aim" on in the host's menu (d
 - Held while zooming in or out and during a zoomed-in C-button turn (applied when it ends); dropped while input is
   disabled (tutorial messages, cut-scenes), paused, in menus and during a zoomed-out C-button turn (handleAnalogStick
   does not run: the motion of those frames is lost, the view keeps its game-driven turn). Sums held at +-90 degrees.
-- `[motion]` log lines: when motion starts turning the camera, every 600 game frames and when camera control ends
-  (degrees applied, degrees dropped).
+- `[motion]` log lines: when motion starts turning the camera, after 20 game frames without motion ("rotation
+  stopped": the angle of that one turn), every 600 game frames and when camera control ends (degrees applied, degrees
+  dropped). Every picture the game takes logs `[snap] photo taken at retrace N, film left F (shutter | Snap button |
+  A)` (player.c, #ifdef PORT, after makePhoto).
 Harness: `run.mjs` / node `port-test` `--motion F:YAW:PITCH[:LEN],...` (per retrace, before the pad, as the host).
 The local test page (port/web/index.html) is a scripted harness without live input: no DeviceMotionEvent there.
 

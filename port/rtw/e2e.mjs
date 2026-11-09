@@ -17,6 +17,11 @@
 //         offline  every server stopped, the network off: reload, boot from the caches and the remembered ROM.
 //         beach  (F2, not in the default list) phone portrait 390x844 at dpr 3, the SAVE continued to the Beach with
 //                Pixels Smooth and then Sharp (the host's stored option): screenshots to compare by eye.
+//         motion  (F3 + F4, not in the default list; a host with Motion aim and Full-screen landscape, e.g.
+//                RTW_REPO=~/Code/retrowser-wt-motion) phone landscape 844x390: both toggles from the host's menu, the SAVE
+//                continued to the Beach's camera control, device motion turns the camera right (the module's
+//                "[motion] rotation stopped" line, pictures) and nothing with Motion aim off, the same sign in
+//                landscape 90 and 270; one tap on the corner zone takes one picture, also with a finger on the stick.
 // Screenshots and the stored save go to the out dir (game pictures: local only, never commit). Every server and
 // Chrome it starts is stopped at the end. Prints PASS / FAIL lines.
 import { createRequire } from 'node:module';
@@ -69,6 +74,7 @@ async function newCtx(opts = {}) {
 // the old tail and the new head), so a line logged again by a restarted module counts again
 function logger(page) {
   const seen = [];
+  const all = [];   // every line since the start (reset() does not clear it)
   let prev = [];
   const poll = async () => {
     const l = (await page.getAttribute('[data-state=playing]', 'data-log').catch(() => null));
@@ -80,12 +86,13 @@ function logger(page) {
       for (let i = 0; i < k && ok; i++) ok = prev[prev.length - k + i] === cur[i];
       if (ok) break;
     }
-    for (const line of cur.slice(k)) seen.push(line);
+    for (const line of cur.slice(k)) { seen.push(line); all.push(line); }
     prev = cur;
   };
   const timer = setInterval(() => { poll().catch(() => {}); }, 200);
   return {
     async text() { await poll(); return seen.join('\n'); },
+    async allText() { await poll(); return all.join('\n'); },
     async wait(re, secs) {
       const t0 = Date.now();
       while (Date.now() - t0 < secs * 1000) {
@@ -469,6 +476,226 @@ async function beach() {
   } finally { await phone.close().catch(() => {}); }
 }
 
+// F3 + F4 through the host's UI (needs a host with Motion aim and Full-screen landscape: RTW_REPO = the retrowser
+// checkout that has them; with an older host the phase fails at the toggles). Phone landscape 844x390 (dpr 3, touch,
+// the screen angle set through CDP as the host's e2e/motion.test.ts does, devicemotion events dispatched on the page,
+// DeviceMotionEvent.requestPermission stubbed the iOS way: allowed from the toggle's tap):
+//  1. ☰ -> Touch controls: Full-screen landscape on; ☰ -> Motion: Motion aim on (the permission asked from the tap);
+//  2. the SAVE continued to the Beach (A every 2 s, as the beach phase), the tutorial's "Press Z to aim" passed with Z
+//     held, until the player controls the camera;
+//  3. a known turn right (90 deg/s about the device's x for 1 s at 90 deg: about +90 degrees of yaw): the module's
+//     "[motion] rotation stopped ... yaw +N" line (pc_options.c) and a screenshot pair (a quarter turn: a new view);
+//     then Motion aim off in the menu and the same events: no [motion] line, the view does not turn (picture pair);
+//  4. one tap on the corner zone: the [snap] shutter sequence and "[snap] photo taken ..., film left N (shutter)",
+//     then the same with a finger held on the stick;
+//  5. landscape-secondary (270): the same physical turn right (now +beta) gives a positive yaw as well.
+async function motion() {
+  const LAND = { width: 844, height: 390 };
+  const ctx = await newCtx({ viewport: LAND, deviceScaleFactor: 3, isMobile: true, hasTouch: true });
+  // iOS-style permission (the host's e2e/motion.test.ts): the first grant only from a tap; once granted, iOS answers
+  // at once for the rest of the page's life (the host asks again without a tap when the game restarts, e.g. a save
+  // import)
+  await ctx.addInitScript(() => {
+    window.__asks = 0;
+    let granted = false;
+    DeviceMotionEvent.requestPermission = () => {
+      window.__asks++;
+      const tap = window.event?.type;
+      if (!granted && tap !== 'click' && tap !== 'touchend') return Promise.reject(new DOMException('needs a tap', 'NotAllowedError'));
+      granted = true;
+      return Promise.resolve('granted');
+    };
+  });
+  const page = await ctx.newPage();
+  page.on('pageerror', (e) => errors.push(e.message));
+  const L = logger(page);
+  const cdp = await ctx.newCDPSession(page);
+  const orient = async (angle) => {
+    await cdp.send('Emulation.setDeviceMetricsOverride', {
+      width: LAND.width, height: LAND.height, deviceScaleFactor: 3, mobile: true,
+      screenOrientation: { type: angle === 90 ? 'landscapePrimary' : 'landscapeSecondary', angle },
+    });
+    await page.waitForFunction((a) => screen.orientation.angle === a && matchMedia('(orientation: landscape)').matches, angle);
+    await sleep(300);
+  };
+  const openMenu = async () => {
+    await page.click((await page.$('[data-action=fsl-menu]')) ? '[data-action=fsl-menu]' : '[data-action=menu]');
+    await page.waitForSelector('[data-state=menu]');
+  };
+  const closeMenu = async () => { if (await page.$('[data-action=close-menu]')) await page.click('[data-action=close-menu]', { timeout: 5000 }).catch(() => {}); await sleep(300); };
+  const motionAttr = () => page.getAttribute('[data-state=playing]', 'data-motion');
+  // devicemotion as a gyroscope sends it (deg/s about the device's x = beta, y = gamma, z = alpha)
+  const rotate = (r, ms) => page.evaluate(async ({ r, ms }) => {
+    const end = performance.now() + ms;
+    while (performance.now() < end) {
+      dispatchEvent(new DeviceMotionEvent('devicemotion', { rotationRate: { alpha: r.alpha ?? 0, beta: r.beta ?? 0, gamma: r.gamma ?? 0 }, interval: 16 }));
+      await new Promise((ok) => setTimeout(ok, 16));
+    }
+  }, { r, ms });
+  const box = async (sel) => page.locator(sel).first().boundingBox().catch(() => null);
+  let touchId = 20;
+  const touchPts = new Map();
+  const pts = () => [...touchPts].map(([id, [x, y]]) => ({ x, y, id, radiusX: 2, radiusY: 2, force: 1 }));
+  const touchStart = async (x, y) => { const id = touchId++; touchPts.set(id, [x, y]); await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: pts() }); return id; };
+  const touchEnd = async (id) => {
+    const p = touchPts.get(id); touchPts.delete(id);
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: touchPts.size ? [{ x: p[0], y: p[1], id, radiusX: 2, radiusY: 2, force: 1 }] : [] });
+  };
+  // one turn: the "[motion] rotation stopped" line that follows it (the yaw in degrees), null if the camera did not move
+  const turn = async (r, ms) => {
+    await L.reset();
+    await rotate(r, ms);
+    const line = await L.wait(/\[motion\] rotation stopped/, 6);
+    const m = line && line.match(/yaw ([+-][\d.]+), pitch ([+-][\d.]+)/);
+    return m ? { yaw: +m[1], pitch: +m[2], line } : { yaw: null, line: line ?? 'no "[motion] rotation stopped" line' };
+  };
+  try {
+    await orient(90);
+    await openGame(page, { remember: false });
+    await page.waitForSelector('[data-state=playing]', { timeout: 180000 });
+    await L.wait(/rtw: game started/, 90);
+    // 1. the host's toggles
+    await openMenu();
+    const fsl = await page.$('[data-field=fs-landscape]');
+    if (fsl) await fsl.check();
+    const mt = await page.$('[data-field=motion]');
+    if (mt && !(await mt.isChecked())) await mt.click();
+    await sleep(500);
+    const asks = await page.evaluate(() => window.__asks);
+    const motionChecked = mt ? await mt.isChecked() : false;
+    await closeMenu();
+    const corner = await page.waitForSelector('.play.fsl.has-corner .corner-zone', { timeout: 5000 }).catch(() => null);
+    check('motion: Full-screen landscape on from the menu: no bar, the corner zone "Shutter" at the top right', fsl && corner &&
+      !(await page.isVisible('.play .bar')) && /Shutter/.test(await corner.textContent()),
+      fsl ? (corner ? `zone ${JSON.stringify(await corner.boundingBox())}` : 'no .corner-zone') : 'no [data-field=fs-landscape] (host without the layout?)');
+    check('motion: Motion aim on from the menu (permission asked from the tap, granted)', mt && motionChecked && asks >= 1 && await motionAttr() === 'on',
+      mt ? `checked ${motionChecked}, asks ${asks}, data-motion ${await motionAttr()}` : 'no [data-field=motion] (host without Motion aim?)');
+    await shot(page, 'motion-fsl', true);
+    // 2. the save, then the Beach
+    await openMenu();
+    await L.reset();
+    await page.setInputFiles('[data-field=import-save]', SAVE);
+    const st = await L.wait(/rtw: game started.*save from the host/, 90);
+    await closeMenu();
+    check('motion: the save imported (fresh game from the save)', !!st, st ?? '');
+    const t0 = Date.now();
+    while (Date.now() - t0 < 75000) { await press(page, 'KeyX'); await sleep(2000); }
+    await shot(page, 'motion-beach', true);
+    // the tutorial stops the cart at "Press Z to aim" (the picture still, motion dropped by design): Z held, A, Z let
+    // go, A, until the picture moves again (the cart going on)
+    let moving = 0;
+    for (let i = 0; i < 10; i++) {
+      const a = await shot(page, `motion-wait-${i}a`);
+      await sleep(1000);
+      const b = await shot(page, `motion-wait-${i}b`);
+      moving = pixelDiff(a, b);
+      if (moving > 0.05) break;
+      console.log(`  motion: the picture is still (${(moving * 100).toFixed(1)} % changed): Z held + A`);
+      await page.keyboard.down('KeyZ'); await sleep(2000);
+      await press(page, 'KeyX'); await sleep(1500);
+      await page.keyboard.up('KeyZ'); await sleep(2000);
+      await press(page, 'KeyX'); await sleep(2500);
+    }
+    check('motion: the Beach, the cart moving (camera control)', moving > 0.05, `${(moving * 100).toFixed(0)} % of pixels changed in 1 s`);
+    check('motion: no permission banner over the game after the restart', !(await page.$('[data-state=motion-ask]')) && await motionAttr() === 'on',
+      `data-motion ${await motionAttr()}`);
+    // 3. a turn right while the player controls the camera (tried again while a message or a cut-scene holds it)
+    let right = null, before = null, after = null;
+    for (let i = 0; i < 8 && !(right && right.yaw != null); i++) {
+      if (i) { console.log(`  motion: no camera turn yet (${right.line}); A, then again`); await press(page, 'KeyX'); await sleep(2500); }
+      before = await shot(page, `motion-right-${i}-before`);
+      right = await turn({ beta: -90 }, 1000);
+      after = await shot(page, `motion-right-${i}-after`);
+    }
+    const dOn = before && after ? pixelDiff(before, after) : 0;
+    check('motion (90): a turn right of the phone turns the game right (about +90 degrees of yaw)', right.yaw != null && right.yaw > 50 && right.yaw < 130,
+      `${right.line.replace(/^.*\[motion\] /, '')}; picture change ${(dOn * 100).toFixed(0)} % of pixels`);
+    // and back left: the opposite sign
+    const left = await turn({ beta: 90 }, 1000);
+    check('motion (90): the same turn to the left gives a negative yaw', left.yaw != null && left.yaw < -50, left.line.replace(/^.*\[motion\] /, ''));
+    // 5. landscape-secondary: the device's top is on the right, the same physical turn right is +beta
+    // (no screenshot between the turns: a Playwright screenshot puts its own emulated orientation back, 90)
+    const angleNow = () => page.evaluate(() => screen.orientation.angle);
+    await orient(270);
+    const a0 = await angleNow();
+    const r270 = await turn({ beta: 90 }, 500);
+    const l270 = await turn({ beta: -90 }, 500);
+    const a1 = await angleNow();
+    await shot(page, 'motion-270', true);
+    const a2 = await angleNow();
+    check('motion (270): the same physical turn right gives the same yaw sign (+), left (-)', a0 === 270 && a1 === 270 && r270.yaw > 20 && l270.yaw < -20,
+      `screen angle ${a0} -> ${a1} (after a screenshot: ${a2}); right: ${r270.line.replace(/^.*\[motion\] /, '')}; left: ${l270.line.replace(/^.*\[motion\] /, '')}`);
+    await orient(90);
+    // 3b. Motion aim off: the same events change nothing
+    await openMenu();
+    const mt2 = await page.$('[data-field=motion]');
+    if (mt2 && await mt2.isChecked()) await mt2.click();
+    await closeMenu();
+    await L.reset();
+    const offA = await shot(page, 'motion-off-before');
+    await rotate({ beta: -90 }, 1000);
+    await sleep(1000);
+    const offB = await shot(page, 'motion-off-after');
+    const tOff = await L.text();
+    const dOff = pixelDiff(offA, offB);
+    check('motion off: the same turn changes nothing (no rtw_motion reaches the game, the view keeps its direction)',
+      await motionAttr() === 'off' && !/\[motion\]/.test(tOff) && dOff < dOn,
+      `data-motion ${await motionAttr()}; ${(tOff.match(/\[motion\].*/) || ['no [motion] line'])[0]}; picture change ${(dOff * 100).toFixed(0)} % (on: ${(dOn * 100).toFixed(0)} %)`);
+    // 4. the Shutter: one tap on the corner zone = one picture
+    const shutter = async (tag, withStick) => {
+      const zone = await box('.corner-zone');
+      if (!zone) return check(`shutter ${tag}: corner zone`, false, 'no .corner-zone');
+      let stickId = null;
+      if (withStick) {
+        const st2 = await box('[data-touch=stick]');
+        if (st2) { stickId = await touchStart(st2.x + st2.width / 2, st2.y + 2); await sleep(300); }   // the stick's top edge: up
+      }
+      const films = [...(await L.allText()).matchAll(/\[snap\] photo taken.*film left (\d+)/g)];
+      const filmBefore = films.length ? +films[films.length - 1][1] : 60;
+      let photo = null, ignored = '';
+      // a tutorial message holds the camera now and then ("tap ignored ... (no camera control)"): wait and tap again
+      for (let i = 0; i < 6 && !photo; i++) {
+        if (i) { ignored = (await L.text()).match(/\[snap\] shutter tap ignored.*/)?.[0] ?? ''; console.log(`  shutter ${tag}: ${ignored || 'no photo'}; again in 3 s`); await sleep(3000); }
+        await L.reset();
+        const id = await touchStart(zone.x + zone.width * 0.7, zone.y + zone.height * 0.3);
+        await sleep(120);
+        await touchEnd(id);
+        photo = await L.wait(/\[snap\] photo taken/, 6);
+      }
+      await sleep(300);
+      await shot(page, `shutter-${tag}`, true);
+      await L.wait(/\[snap\] leave -> idle|\[snap\] shoot -> idle/, 5);
+      if (stickId != null) await touchEnd(stickId);
+      const t = await L.text();
+      const seq = [...t.matchAll(/\[snap\] (\w+) -> (\w+) at retrace \d+.*?shutter\)/g)].map((m) => m[2]).join(' ');
+      check(`shutter ${tag}: one tap on the corner = one picture (the [snap] sequence, the film counter)`,
+        photo && /\(shutter\)/.test(photo) && /enter aim shoot/.test(seq) && !/tap ignored/.test(t) && (!withStick || stickId != null) &&
+        +(photo.match(/film left (\d+)/)?.[1]) === filmBefore - 1,
+        `${seq || 'no shutter sequence'}; ${photo ? photo.replace(/^.*\[snap\] /, '') : 'no photo'} (before: ${filmBefore})` +
+        (withStick ? `; stick ${stickId != null ? 'held' : 'not found'}${/stick 0,80/.test(t) ? ' (pad0 stick 0,80)' : ''}` : '') +
+        (ignored ? `; earlier tap: ${ignored.replace(/^.*\[snap\] /, '')}` : ''));
+      return photo;
+    };
+    await shutter('tap', false);
+    await sleep(2500);
+    await shutter('tap-stick-held', true);
+    await sleep(2000);
+    await shot(page, 'shutter-after', true);
+    writeFileSync(join(outDir, 'log-motion.txt'), await L.allText());
+  } finally { L.stop(); await ctx.close(); }
+}
+// share of pixels whose colour changed by more than 48 (sum of |dR|+|dG|+|dB|) between two same-size screenshots
+function pixelDiff(fa, fb) {
+  const a = pngPixels(fa), b = pngPixels(fb);
+  if (a.w !== b.w || a.h !== b.h) return 1;
+  let n = 0;
+  for (let i = 0; i < a.w * a.h; i++) {
+    const o = i * a.bpp, p = i * b.bpp;
+    if (Math.abs(a.px[o] - b.px[p]) + Math.abs(a.px[o + 1] - b.px[p + 1]) + Math.abs(a.px[o + 2] - b.px[p + 2]) > 48) n++;
+  }
+  return n / (a.w * a.h);
+}
+
 async function wrong() {
   const bad = join(outDir, 'wrong.z64');   // the ROM with one byte changed (local only, deleted at the end)
   const z = readFileSync(join(ROOT, 'pokemonsnap.z64'));
@@ -517,7 +744,7 @@ async function offline() {
 try {
   for (const p of PHASES) {
     console.log(`== ${p}`);
-    try { await ({ desk, title, touch, options, beach, wrong, offline })[p](); } catch (e) { check(`${p}: ran`, false, e.stack || String(e)); }
+    try { await ({ desk, title, touch, options, beach, motion, wrong, offline })[p](); } catch (e) { check(`${p}: ran`, false, e.stack || String(e)); }
   }
   check('no page errors', errors.length === 0, errors.slice(0, 3).join(' | '));
 } finally {

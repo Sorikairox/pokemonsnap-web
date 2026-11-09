@@ -121,6 +121,12 @@ void port_snap_shoot_ready(int ready) {
     shoot_seen = port_vi_count;
 }
 
+/* app_level/player.c (#ifdef PORT): the game took a picture, whatever pressed A; filmLeft: the film counter after it */
+void port_snap_photo_taken(int film_left) {
+    port_log("[snap] photo taken at retrace %u, film left %d (%s)\n", port_vi_count, film_left,
+             snap_state == SNAP_SHOOT ? (snap_shutter ? "shutter" : "Snap button") : "A");
+}
+
 static void snap_go(int state) {
     if (state != snap_state)
         port_log("[snap] %s -> %s at retrace %u (direction %d, %s%s)\n", snap_state_name[snap_state],
@@ -224,7 +230,10 @@ static int motion_yaw, motion_pitch, motion_latched_pitch;
 static unsigned motion_taken = 0xFFFFFFF0u; /* retrace of player.c's last port_motion_take (any mode) */
 static int motion_active;                    /* motion is reaching the camera (for the log) */
 static long long motion_sum_yaw, motion_sum_pitch, motion_dropped;
-static unsigned motion_frames;
+static unsigned motion_frames, motion_still; /* game frames with motion / without since the last one (for the log) */
+/* game frames in camera control without motion after which the turn so far is reported ("rotation stopped"): the
+ * log then gives the angle of each separate turn of the phone (e2e.mjs motion phase reads it) */
+#define MOTION_STILL_FRAMES 20
 
 static int motion_clamp(int v) { return v > MOTION_MAX ? MOTION_MAX : v < -MOTION_MAX ? -MOTION_MAX : v; }
 static long long iabs(long long v) { return v < 0 ? -v : v; }
@@ -264,6 +273,7 @@ int port_motion_take(int mode) {
         motion_dropped += iabs(motion_yaw) + iabs(motion_pitch);
         motion_yaw = motion_pitch = 0;
     } else if (mode == 0 && (motion_yaw || motion_pitch)) {
+        motion_still = 0;
         yaw = motion_yaw;
         motion_latched_pitch = motion_pitch;
         motion_yaw = motion_pitch = 0;
@@ -274,6 +284,10 @@ int port_motion_take(int mode) {
         motion_sum_yaw += yaw;
         motion_sum_pitch += motion_latched_pitch;
         if (++motion_frames >= 600) motion_report("so far");
+    } else if (mode == 0 && motion_active && ++motion_still >= MOTION_STILL_FRAMES) {
+        motion_active = 0;
+        motion_still = 0;
+        motion_report("rotation stopped");
     }
     return yaw;
 }
