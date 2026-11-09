@@ -13,7 +13,9 @@
   "video": "webgl",
   "hz": 60,
   "save": { "kind": "flash", "size": 131072 },
-  "controls": { "extra": [{ "bit": 16, "label": "Snap" }] },
+  "controls": {
+    "extra": [{ "bit": 16, "label": "Snap" }, { "bit": 17, "label": "Shutter", "place": "corner" }]
+  },
   "options": [
     { "id": 1, "label": "Snap button", "type": "bool", "default": 1, "inGame": true },
     { "id": 2, "label": "Sharp pixels", "type": "bool", "default": 0, "inGame": true }

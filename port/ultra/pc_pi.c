@@ -55,7 +55,7 @@ int osPiStartDma(void *mb, int pri, int direction, unsigned devAddr, void *dram,
 static struct { uint16_t buttons; int8_t x, y; } pads[4];
 /* host input (exported): pad 0 is the player's; buttons are N64 OSContPad bits (A = 0x8000, START = 0x1000, ...);
  * bits 16-31 are retrowser's controls.extra buttons, turned into OSContPad bits by port_pad_filter (F1, pc_options.c:
- * the Snap button). Called once per retrace. */
+ * the Snap button, F4: the Shutter). Called once per retrace. */
 int port_pad_filter(int buttons);
 EMSCRIPTEN_KEEPALIVE void port_set_pad(int i, int buttons, int x, int y) {
     if (i < 0 || i > 3) return;

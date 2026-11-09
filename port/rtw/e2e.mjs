@@ -8,7 +8,7 @@
 // Phases: desk   boot from the ROM picker (remembered), input, audio, pacing, pause, save import -> Continue ->
 //                Oak's lab -> Save (the host stores the new image; snap_save.py checks it), reload + continue;
 //         touch  phone portrait 390x844 and landscape 844x390 (isMobile, hasTouch): pictures, touch A reaches the pad;
-//                the Snap extra button (F1) is shown and reaches the pad as bit 16;
+//                the Snap extra button (F1) is shown and reaches the pad as bit 16, the Shutter (F4) as bit 17;
 //         options  (F1) the host passes option 1 at start, the game's Options menu changes it (rtw_option_changed),
 //                the host remembers it across a reload; the Snap key (Digit1) reaches the pad;
 //                (F2) option 2 "Pixels" likewise (Smooth -> Sharp), and Sharp is visible: the canvas takes the view's
@@ -330,23 +330,25 @@ async function touch() {
         }
       }
       check(`touch ${name}: the A button reached pad 0`, b && /pad0 buttons 8000/.test(await L.text()), b ? '' : 'no [data-touch=A]');
-      // F1: the manifest's extra button "Snap" (controls.extra bit 16) is on the layout, inside the view, and reaches
-      // pad 0 as bit 16
-      const sb = await page.locator('[data-touch=x16]').first().boundingBox().catch(() => null);
-      const label = sb ? (await page.locator('[data-touch=x16]').first().textContent()) : '';
-      check(`touch ${name}: the Snap button is shown`, sb && sb.width >= 20 && sb.height >= 20 && sb.x >= 0 && sb.y >= 0 &&
-        sb.x + sb.width <= w && sb.y + sb.height <= h && /Snap/.test(label), sb ? `${label} ${Math.round(sb.x)},${Math.round(sb.y)} ${Math.round(sb.width)}x${Math.round(sb.height)}` : 'no [data-touch=x16]');
-      if (sb) {
+      // F1 / F4: the manifest's extra buttons "Snap" (bit 16) and "Shutter" (bit 17) are on the layout, inside the view,
+      // and reach pad 0 as their bit (the host's default layout draws "Shutter" as an ordinary extra button)
+      for (const [bit, name2, hex, id] of [[16, 'Snap', '10000', 8], [17, 'Shutter', '20000', 9]]) {
+        const sel = `[data-touch=x${bit}]`, re = new RegExp(`pad0 buttons ${hex}`);
+        const sb = await page.locator(sel).first().boundingBox().catch(() => null);
+        const label = sb ? (await page.locator(sel).first().textContent()) : '';
+        check(`touch ${name}: the ${name2} button is shown`, sb && sb.width >= 20 && sb.height >= 20 && sb.x >= 0 && sb.y >= 0 &&
+          sb.x + sb.width <= w && sb.y + sb.height <= h && new RegExp(name2).test(label), sb ? `${label} ${Math.round(sb.x)},${Math.round(sb.y)} ${Math.round(sb.width)}x${Math.round(sb.height)}` : `no ${sel}`);
+        if (!sb) continue;
         const cdp = await ctx.newCDPSession(page);
-        const pt = [{ x: sb.x + sb.width / 2, y: sb.y + sb.height / 2, id: 8, radiusX: 2, radiusY: 2, force: 1 }];
-        for (let i = 0; i < 3 && !/pad0 buttons 10000/.test(await L.text()); i++) {
+        const pt = [{ x: sb.x + sb.width / 2, y: sb.y + sb.height / 2, id, radiusX: 2, radiusY: 2, force: 1 }];
+        for (let i = 0; i < 3 && !re.test(await L.text()); i++) {
           await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: pt });
           await sleep(150);
-          if (!i) await shot(page, `touch-${name}-Snap-down`, true);
+          if (!i) await shot(page, `touch-${name}-${name2}-down`, true);
           await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
           await sleep(800);
         }
-        check(`touch ${name}: the Snap button reached pad 0 (bit 16)`, /pad0 buttons 10000/.test(await L.text()));
+        check(`touch ${name}: the ${name2} button reached pad 0 (bit ${bit})`, re.test(await L.text()));
       }
       const boxes = await page.evaluate(() => [...document.querySelectorAll('[data-touch], [data-field=screen]')].map((e) => {
         const r = e.getBoundingClientRect(); return `${e.dataset.touch ?? 'screen'} ${Math.round(r.x)},${Math.round(r.y)} ${Math.round(r.width)}x${Math.round(r.height)}`;

@@ -217,6 +217,8 @@ void screenCoorsToWorld(f32*, f32*, f32*);
 /* port (F1, port/ultra/pc_options.c): the Snap button learns, every game frame, that the player controls the camera
  * and how far the zoom is (gDirectionIndex: -1 zoomed in, -2 zooming, >= 0 zoomed out) */
 void port_snap_course(s32 direction, s32 zoomSwitch, s32 ready);
+/* F4 (the Shutter): updateCameraZoomedIn, each zoomed-in frame: whether an A press takes a picture now */
+void port_snap_shoot_ready(s32 ready);
 #define PORT_SNAP_COURSE(ready) port_snap_course(gDirectionIndex, ZoomSwitchMode, (ready) && !IsPaused)
 #endif
 void BumpDetector_Init(void);
@@ -1371,6 +1373,9 @@ void updateCameraZoomedIn(GObj* obj) {
             sTimerInFocus = 0;
             D_80382C3C_52304C = false;
         }
+#ifdef PORT
+        port_snap_shoot_ready(sTimerAfterPhotoTaken < 0 && TargetDirectionZoomedIn == 0); /* F4: A takes a photo now */
+#endif
         if (sTimerAfterPhotoTaken < 0) {
             if (TargetDirectionZoomedIn == 0 && (gContInputPressedButtons & A_BUTTON)) {
                 camera = ohFindByLinkAndId(LINK_0, OBJID_MAIN_CAMERA);

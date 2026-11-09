@@ -23,6 +23,19 @@ rm -rf "$D"; mkdir -p "$D"
 python3 -I port/rtw/romfill.py "$Z64" "$L" "$D"
 cp "$L/pokemonsnap.js" "$D/"
 cp port/rtw/retrowser.json "$D/"
+# TODO(retrowser host, F3/F4): `controls.motion` (motion aim) and `controls.extra[].place` (the Shutter's "corner")
+# are new keys of the host's interface. A check tool (and host) whose schema does not know them yet rejects the whole
+# manifest (additionalProperties: false), so they are left out of the shipped copy until RTW_MJS knows them; the
+# source manifest port/rtw/retrowser.json keeps them. Remove this step once every host in use has the keys.
+node -e '
+const fs = require("fs"), [tool, man] = process.argv.slice(1), src = fs.readFileSync(tool, "utf8"), m = JSON.parse(fs.readFileSync(man, "utf8"));
+const knows = (k) => new RegExp(`"${k}"\\s*:\\s*\\{`).test(src), gone = [];
+if (m.controls && "motion" in m.controls && !knows("motion")) { delete m.controls.motion; gone.push("controls.motion"); }
+for (const x of m.controls?.extra ?? []) if ("place" in x && !knows("place")) { delete x.place; gone.push(`controls.extra bit ${x.bit} place`); }
+if (gone.length) {
+  console.log(`rtw: TODO: the check tool does not know ${gone.join(", ")} yet: left out of the shipped manifest`);
+  fs.writeFileSync(man, JSON.stringify(m, null, 2) + "\n");
+}' "$RTW_MJS" "$D/retrowser.json"
 node "$RTW_MJS" hash "$D"
 node "$RTW_MJS" check "$D" --rom "$Z64"
 [ -f "$RTW_ROM" ] && node "$RTW_MJS" check "$D" --rom "$RTW_ROM"

@@ -21,13 +21,20 @@
  * when it is let go, A is pressed once (the photo) and the camera zooms out again (Z let go / one more Z press). It
  * acts only while the player controls the camera in a course: app_level/player.c calls port_snap_course() every game
  * frame from handleAnalogStick and the tutorial's wait loop (#ifdef PORT) with the zoom state; anywhere else (menus,
- * pause menu, camera check) the bit is dropped, so it never presses A in a menu. */
+ * pause menu, camera check) the bit is dropped, so it never presses A in a menu.
+ *
+ * Shutter (pad bit 17, PORT_PAD_SHUTTER, session F4): one tap = one complete picture, through the same state machine.
+ * Not zoomed: zoom in (Z held / one Z press, as the Snap button), wait until updateCameraZoomedIn reports that A takes
+ * a picture now (port_snap_shoot_ready) for SHUTTER_READY_FRAMES game frames, press A once, zoom back out. Already
+ * zoomed in: only the A press. A tap while a sequence runs, while zooming, or outside camera control is ignored
+ * (logged), never queued: a queued tap would fire at a moment the player did not choose. */
 #include "pc_os.h"
 #include <emscripten.h>
 #include <stdlib.h>
 
 enum { PORT_OPT_SNAP_BUTTON = 1, PORT_OPT_PIXELS, PORT_OPT_COUNT };
 #define PORT_PAD_SNAP 0x10000
+#define PORT_PAD_SHUTTER 0x20000
 #define Z_TRIG 0x2000
 #define A_BUTTON 0x8000
 
@@ -78,9 +85,14 @@ void port_option_set_by_game(int id, int value) {
 enum { SNAP_IDLE, SNAP_ENTER, SNAP_AIM, SNAP_SHOOT, SNAP_LEAVE };
 static const char *const snap_state_name[] = {"idle", "enter", "aim", "shoot", "leave"};
 static int snap_state, snap_t, snap_let_go, snap_zoomed_by_us;
+static int snap_shutter; /* F4: this sequence was started by a Shutter tap (bit 17), not by holding Snap (bit 16) */
+static int shutter_was_down;
 /* what player.c reported last (port_snap_course) */
 static unsigned course_seen = 0xFFFFFFF0u; /* retrace of the last report */
 static int course_dir, course_switch, course_ready;
+/* F4: game frames in a row in which updateCameraZoomedIn would take a picture on A (port_snap_shoot_ready) */
+static unsigned shoot_seen = 0xFFFFFFF0u;
+static int shoot_frames;
 unsigned port_snap_photos; /* A presses sent */
 
 /* app_level/player.c, every game frame while the player controls the camera: gDirectionIndex (>= 0 zoomed out and
@@ -88,45 +100,71 @@ unsigned port_snap_photos; /* A presses sent */
  * zoom may start now (zoom enabled, input not disabled) */
 void port_snap_course(int direction, int zoom_switch, int ready) {
     course_seen = port_vi_count;
+    if (direction != -1) shoot_frames = 0;
     course_dir = direction;
     course_switch = zoom_switch;
     course_ready = ready;
 }
 
+/* F4: updateCameraZoomedIn, every zoomed-in game frame: 1 when an A press now takes a picture (no C-button turn, the
+ * game's minimum time between two photos is over) */
+void port_snap_shoot_ready(int ready) {
+    if (!ready) shoot_frames = 0;
+    else if (shoot_seen != port_vi_count) shoot_frames++;
+    shoot_seen = port_vi_count;
+}
+
 static void snap_go(int state) {
     if (state != snap_state)
-        port_log("[snap] %s -> %s at retrace %u (direction %d, %s)\n", snap_state_name[snap_state], snap_state_name[state],
-                 port_vi_count, course_dir, course_switch ? "switch" : "hold");
+        port_log("[snap] %s -> %s at retrace %u (direction %d, %s%s)\n", snap_state_name[snap_state],
+                 snap_state_name[state], port_vi_count, course_dir, course_switch ? "switch" : "hold",
+                 snap_shutter ? ", shutter" : "");
     snap_state = state;
     snap_t = 0;
 }
 
 #define SNAP_PRESS 4      /* retraces a synthetic press lasts (the game samples the pad once per game frame) */
 #define SNAP_STALE 10     /* retraces without a report from player.c: not in a course any more */
+/* F4: zoomed-in game frames (A accepted) before the shutter presses A. The photo and the Pokemon it scores are what the
+ * detector last analysed (pokemon_detect.c: a post-process of the drawn frame, copied to the game a frame later), which
+ * lags the camera; 3 frames make that a zoomed-in frame rather than the last step of the zoom. */
+#define SHUTTER_READY_FRAMES 3
 
 /* pc_pi.c port_set_pad: pad 0's buttons as the host sends them (bits 16-31: controls.extra) -> the OSContPad bits the
  * game reads */
 int port_pad_filter(int buttons) {
     int held = (buttons & PORT_PAD_SNAP) && opt_value[PORT_OPT_SNAP_BUTTON];
+    int shutter_down = (buttons & PORT_PAD_SHUTTER) != 0;
+    int tap = shutter_down && !shutter_was_down; /* F4: the press is the tap, however long it is held */
     int out = buttons & 0xFFFF;
     int fresh = port_vi_count - course_seen <= SNAP_STALE;
+    shutter_was_down = shutter_down;
     if (!fresh) {
         if (snap_state != SNAP_IDLE) snap_go(SNAP_IDLE);
+        if (tap) port_log("[snap] shutter tap ignored at retrace %u (no camera control)\n", port_vi_count);
         return out;
     }
     snap_t++;
     if (!held) snap_let_go = 1;
+    if (tap && (snap_state != SNAP_IDLE || held))
+        port_log("[snap] shutter tap ignored at retrace %u (%s busy)\n", port_vi_count,
+                 held && snap_state == SNAP_IDLE ? "Snap" : snap_state_name[snap_state]);
     switch (snap_state) {
     case SNAP_IDLE:
-        if (held && course_ready && port_vi_count - course_seen <= 4) {
+        if ((held || tap) && course_ready && port_vi_count - course_seen <= 4) {
             snap_let_go = 0;
-            if (course_dir == -1) { /* already zoomed in (Z toggled by the player): only the photo */
+            snap_shutter = !held;
+            if (course_dir == -1) { /* already zoomed in (Z toggled / held by the player): only the photo */
                 snap_zoomed_by_us = 0;
                 snap_go(SNAP_AIM);
             } else if (course_dir >= 0) {
                 snap_zoomed_by_us = 1;
                 snap_go(SNAP_ENTER);
+            } else if (!held) {
+                port_log("[snap] shutter tap ignored at retrace %u (zooming)\n", port_vi_count);
             }
+        } else if (tap && !held) {
+            port_log("[snap] shutter tap ignored at retrace %u (zoom not available now)\n", port_vi_count);
         }
         break;
     case SNAP_ENTER:
@@ -134,7 +172,11 @@ int port_pad_filter(int buttons) {
         else if (snap_t > 90) snap_go(SNAP_LEAVE); /* the zoom did not start: give up without pressing A */
         break;
     case SNAP_AIM:
-        if (snap_let_go) snap_go(SNAP_SHOOT);
+        if (snap_shutter) { /* F4: shoot as soon as the zoomed camera takes pictures */
+            if (course_dir != -1) snap_go(SNAP_IDLE);
+            else if (shoot_frames >= SHUTTER_READY_FRAMES) snap_go(SNAP_SHOOT);
+            else if (snap_t > 90) snap_go(snap_zoomed_by_us ? SNAP_LEAVE : SNAP_IDLE); /* never ready: no A */
+        } else if (snap_let_go) snap_go(SNAP_SHOOT);
         else if (course_dir != -1) snap_go(SNAP_IDLE); /* zoomed out by the player (Z) */
         break;
     case SNAP_SHOOT:

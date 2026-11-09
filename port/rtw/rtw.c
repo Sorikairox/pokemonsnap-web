@@ -195,6 +195,9 @@ EMSCRIPTEN_KEEPALIVE int rtw_start(void) {
 
 /* ---------------------------------------------------------------- input, pause, view */
 static int pad_buttons, pad_x, pad_y, pad_logged;
+/* F4: a Shutter press (bit 17) seen by any rtw_input since the last retrace reaches that retrace, so a tap shorter
+ * than a field is not lost between two retraces */
+static int pad_shutter_seen;
 
 static int stick(int v) {
     if (v < -127) v = -127;
@@ -204,8 +207,10 @@ static int stick(int v) {
 
 EMSCRIPTEN_KEEPALIVE int rtw_input(int port, int buttons, int sx, int sy) {
     if (port != 0) return 0; /* one controller */
-    /* bits 16-31: controls.extra (bit 16 "Snap", F1): port_set_pad -> port_pad_filter (pc_options.c) */
-    int b = buttons & 0x1FFFF, x = stick(sx), y = stick(sy);
+    /* bits 16-31: controls.extra (bit 16 "Snap", F1; bit 17 "Shutter", F4): port_set_pad -> port_pad_filter
+     * (pc_options.c) */
+    int b = buttons & 0x3FFFF, x = stick(sx), y = stick(sy);
+    pad_shutter_seen |= b & 0x20000;
     if ((b != pad_buttons || x != pad_x || y != pad_y) && pad_logged < 200) {
         pad_logged++;
         logf_("rtw: pad0 buttons %04x stick %d,%d (retrace %u)", b, x, y, port_vi_count);
@@ -242,7 +247,8 @@ EMSCRIPTEN_KEEPALIVE int rtw_resize(int w, int h, int dpr) {
 /* one retrace, called by rtw_glue.js (outside every host export) */
 EMSCRIPTEN_KEEPALIVE void port_rtw_retrace(void) {
     if (!started) return;
-    port_set_pad(0, pad_buttons, pad_x, pad_y);
+    port_set_pad(0, pad_buttons | pad_shutter_seen, pad_x, pad_y);
+    pad_shutter_seen = 0;
     port_vi_retrace();
     port_save_poll(); /* a [save] log line per flash change (the host reads rtw_save_generation itself) */
 }
