@@ -44,7 +44,7 @@ Needs `./pokemonsnap.z64` (`port/docker/run.sh rom PATH`) and the local retrowse
 | `save` | `flash`, 131072 | the cartridge's FlashRAM, console byte order (SAVE.md) |
 | `license`, `source` | `MIT`, github.com/Sorikairox/pokemonsnap-web | public repo |
 | `controls.extra` | bit 16 "Snap" | F1: the Snap button (FEATURES.md) |
-| | bit 17 "Shutter", `place: "corner"` | F4: one tap = one picture; a trigger zone in the host's full-screen landscape layout |
+| | bit 17 "Shutter" | F4: one tap = one picture; an ordinary extra button (the `place: "corner"` zone and "Knock to shoot" were removed by the user) |
 | `controls.motion` | `true` | F3: the module takes `rtw_motion` (motion aim) |
 | `options` | id 1 "Snap button", bool, default 1, `inGame` | F1: shown in the game's Options menu, kept by the host |
 | | id 2 "Sharp pixels", bool, default 0, `inGame` | F2: the Options menu's "Pixels Smooth / Sharp" row, kept by the host |
@@ -95,11 +95,10 @@ Shared-code hooks (weak defaults keep the harness as it was): `port_vbe_fix_defe
 - **Motion** (F3): export `rtw_motion(port, yaw, pitch)` (port 0; 1/1024 degree, host-corrected for orientation)
   -> `port_motion_add`; logged once (`rtw: motion aim: first rotation from the host`). **Shutter** (F4): `rtw_input`
   keeps bits 0-17; a bit-17 press seen by any `rtw_input` reaches the next retrace.
-- **New manifest keys and the check tool** (TODO, F3/F4): `controls.motion` and `controls.extra[].place` are new in
-  the host's interface. A check tool / host whose schema does not have them rejects the manifest
-  (`additionalProperties: false`), so `build.sh` leaves them out of the shipped `retrowser.json` while
-  `RTW_MJS` does not know them (it prints `rtw: TODO: ...`); the source manifest keeps them. With them left out the
-  host offers no Motion aim and draws Shutter as an ordinary extra button. `rtw_motion` is reported as an unknown
+- **New manifest key and the check tool** (TODO, F3): `controls.motion` is new in the host's interface. A check tool
+  / host whose schema does not have it rejects the manifest (`additionalProperties: false`), so `build.sh` leaves it
+  out of the shipped `retrowser.json` while `RTW_MJS` does not know it (it prints `rtw: TODO: ...`); the source
+  manifest keeps it. With it left out the host offers no Motion aim. `rtw_motion` is reported as an unknown
   export (a warning) by such a tool.
 - **Imports**: `rtw_log`, `rtw_build_id`, `rtw_rumble`, `rtw_option_changed`. Not used yet: `rtw_export_file` (album photos as PNG would
   be a feature behind an option).
@@ -142,24 +141,24 @@ module refuses; offline (network off, host and mock stopped): reload boots from 
 no request reaches the mock.
 
 motion (F3 + F4, opt-in: `RTW_REPO=~/Code/retrowser-wt-motion PHASES=...,motion`, a host with ☰ -> Motion "Off /
-Motion aim / Knock to shoot" and Full-screen landscape; place it before `offline`, which stops the servers): phone
-landscape 844x390, dpr 3, touch, the screen angle set through CDP, DeviceMotionEvent.requestPermission stubbed the iOS
-way (first grant only from a tap). The devicemotion events are a simulated upright phone: rotationRate from a
+Motion aim" and Full-screen landscape; place it before `offline`, which stops the servers): phone landscape 844x390,
+dpr 3, touch, the screen angle set through CDP, DeviceMotionEvent.requestPermission stubbed the iOS way (first grant
+only from a tap). The host's ☰ is opened by a real touch tap (CDP touchStart/touchEnd, not page.click) at 90 and 270
+in the normal layout and in Full-screen landscape while the game runs: the menu opens and stays open (the host acts on
+pointerup and swallows the click after it). The devicemotion events are a simulated upright phone: rotationRate from a
 device-frame rate and accelerationIncludingGravity = gravity turned by that rotation, so the host's label/unit
 calibration can lock (a roll about the screen's normal: gravity turns, the aim does not). Full-screen landscape (no
-bar, no corner zone, Shutter an ordinary extra button) and Motion aim chosen in the host's menu; the SAVE continued to
-the Beach (A every 2 s for 75 s, then Z held + A until the cart moves: the tutorial stops it at "Press Z to aim" until
-3 photos). Motion aim: the roll locks "axes: spec (locked)"; a turn about gravity at 90 deg/s for 1 s ->
-`[motion] rotation stopped ... yaw +90.4` within 5 % of rate x time, left the same negative, likewise at landscape 270
-(a quarter turn in the pictures); Off -> no `[motion]` line; a corner knock with Motion aim chosen takes no picture.
-Knock to shoot: turning logs no `[motion]` line, a knock on another corner takes none ("other direction" in the
-diagnostic), a knock on the top-right corner (the host's synthetic one) takes exactly one: `[snap] idle -> enter ->
-aim -> shoot -> leave -> idle (shutter)` and `[snap] photo taken ..., film left N (shutter)` one below the previous,
-again with a finger held on the stick. Then a fresh page with WebKit's rotationRate labels (alpha/beta/gamma = rates
-about x/y/z): Chrome is not WebKit, so the host guesses the spec's labels (the roll turns the camera a few degrees
-before the lock), the roll locks "axes: webkit (locked)" and the turn right is again +90 within 5 %. Test notes: a
-Playwright screenshot puts its own emulated orientation (90) back over the CDP override, so none is taken between the
-turns at 270; a turn the game drops (a message or a Pokemon's scene: "... degrees dropped outside camera control") is
-tried again.
+bar, Shutter an ordinary extra button) and Motion aim chosen in the host's menu; the SAVE continued to the Beach (A
+every 2 s for 75 s, then Z held + A until the cart moves: the tutorial stops it at "Press Z to aim" until 3 photos).
+The roll locks "axes: spec (locked)"; a turn about gravity at 90 deg/s for 1 s -> `[motion] rotation stopped ...
+yaw +90.4` within 5 % of rate x time, left the same negative, likewise at landscape 270 (a quarter turn in the
+pictures); Off -> no `[motion]` line. A touch tap on the Shutter button takes exactly one picture: `[snap] idle ->
+enter -> aim -> shoot -> leave -> idle (shutter)` and `[snap] photo taken ..., film left N (shutter)` one below the
+previous, again with a finger held on the stick. Then a fresh page with WebKit's rotationRate labels (alpha/beta/gamma
+= rates about x/y/z): Chrome is not WebKit, so the host guesses the spec's labels (the roll turns the camera a few
+degrees before the lock), the roll locks "axes: webkit (locked)" and the turn right is again +90 within 5 %. Test
+notes: a Playwright screenshot puts its own emulated orientation (90) back over the CDP override, so none is taken
+between the turns at 270; a turn the game drops (a message or a Pokemon's scene: "... degrees dropped outside camera
+control") is tried again. (The host's earlier corner trigger zone and "Knock to shoot" were removed by the user.)
 
 Checklist items not covered: a real phone (WebKit worker, real dpr), a gamepad, export of the save into an emulator.

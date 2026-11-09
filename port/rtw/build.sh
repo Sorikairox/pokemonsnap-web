@@ -23,15 +23,14 @@ rm -rf "$D"; mkdir -p "$D"
 python3 -I port/rtw/romfill.py "$Z64" "$L" "$D"
 cp "$L/pokemonsnap.js" "$D/"
 cp port/rtw/retrowser.json "$D/"
-# TODO(retrowser host, F3/F4): `controls.motion` (motion aim) and `controls.extra[].place` (the Shutter's "corner")
-# are new keys of the host's interface. A check tool (and host) whose schema does not know them yet rejects the whole
-# manifest (additionalProperties: false), so they are left out of the shipped copy until RTW_MJS knows them; the
-# source manifest port/rtw/retrowser.json keeps them. Remove this step once every host in use has the keys.
+# TODO(retrowser host, F3): `controls.motion` (motion aim) is a new key of the host's interface. A check tool (and
+# host) whose schema does not know it yet rejects the whole manifest (additionalProperties: false), so it is left out
+# of the shipped copy while RTW_MJS does not know it (a no-op with a tool that does); the source manifest
+# port/rtw/retrowser.json keeps it. Remove this step once every host in use has the key.
 node -e '
 const fs = require("fs"), [tool, man] = process.argv.slice(1), src = fs.readFileSync(tool, "utf8"), m = JSON.parse(fs.readFileSync(man, "utf8"));
 const knows = (k) => new RegExp(`"${k}"\\s*:\\s*\\{`).test(src), gone = [];
 if (m.controls && "motion" in m.controls && !knows("motion")) { delete m.controls.motion; gone.push("controls.motion"); }
-for (const x of m.controls?.extra ?? []) if ("place" in x && !knows("place")) { delete x.place; gone.push(`controls.extra bit ${x.bit} place`); }
 if (gone.length) {
   console.log(`rtw: TODO: the check tool does not know ${gone.join(", ")} yet: left out of the shipped manifest`);
   fs.writeFileSync(man, JSON.stringify(m, null, 2) + "\n");

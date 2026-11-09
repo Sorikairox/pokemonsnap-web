@@ -38,9 +38,10 @@ Taking a picture needs Z (hold to zoom) + stick + A at once.
 
 ## Shutter: one tap, one picture (session F4, docs/port/notes/F3.md)
 
-`controls.extra` bit 17 "Shutter" with `place: "corner"`: the host draws it as a trigger zone in the top-right corner
-of its full-screen landscape layout (tapped with the right index finger like a camera's shutter), elsewhere as an
-ordinary extra button. A **tap** (the press; its length does not matter) while the player controls the camera is a
+`controls.extra` bit 17 "Shutter": an ordinary extra button of the host's touch layout (also in its Full-screen
+landscape layout). The first design also had `place: "corner"` (a trigger zone in the top-right corner of that
+layout), then a "Knock to shoot" mode (a knock on the phone's corner pressed it); the user removed both, the host
+ignores `place`, and the manifest no longer has it. A **tap** (the press; its length does not matter) while the player controls the camera is a
 whole picture through F1's `port_pad_filter`: not zoomed -> zoom in (Z held, or one Z press with "Z Button Setup:
 Switch") -> wait until `updateCameraZoomedIn` reports that A takes a picture now (`port_snap_shoot_ready`, #ifdef
 PORT: no zoomed-in C-button turn, the game's minimum time between photos over) for 3 game frames, so the frame the
