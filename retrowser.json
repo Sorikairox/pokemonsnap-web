@@ -12,19 +12,19 @@
   "files": {
     "wasm": {
       "path": "pokemonsnap.wasm",
-      "sha256": "55a944d337d7ced9731ec2c823add5bd727e38181a5cf07a74833f342d2c3a73",
-      "size": 6427967
+      "sha256": "28edd509b7fcbe268bb38fde4d5dec1e8a0825e28cc76ea0615fdeafe4fba67b",
+      "size": 6437190
     },
     "js": {
       "path": "pokemonsnap.js",
-      "sha256": "ccff51b2f4d917213b1d6209e26e4d2d4f543e7ed61c785ce8dab7db80ed9ef0",
-      "size": 100752,
+      "sha256": "a1a6c427a2d2010becd2337516947748a40ab5be82be3e8e898c99072c06dc57",
+      "size": 100936,
       "factory": "createPokemonSnap"
     },
     "data": [
       {
         "path": "pokemonsnap.romfill",
-        "sha256": "df59a69662a7ed8c665943b29ce3aab874f513b3351f194b20478673f5c8d26b",
+        "sha256": "298e979263c8ac93fb1a7a68c03fb565b7d5a820285807f409212c6773aac33d",
         "size": 5536
       }
     ]
@@ -36,10 +36,16 @@
     "size": 131072
   },
   "controls": {
+    "motion": true,
     "extra": [
       {
         "bit": 16,
         "label": "Snap"
+      },
+      {
+        "bit": 17,
+        "label": "Shutter",
+        "place": "corner"
       }
     ]
   },

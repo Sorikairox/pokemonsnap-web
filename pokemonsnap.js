@@ -2206,6 +2206,7 @@ var _port_option_get,
   _malloc,
   _port_display_sharp,
   _port_option_set,
+  _port_motion_add,
   _port_thread_dump,
   _port_set_pad,
   _port_vi_retrace,
@@ -2228,6 +2229,7 @@ var _port_option_get,
   _rtw_save_load,
   _rtw_start,
   _rtw_input,
+  _rtw_motion,
   _rtw_option,
   _rtw_pause,
   _rtw_resize,
@@ -2362,6 +2364,7 @@ function assignWasmExports(wasmExports) {
   _malloc = wasmExports['malloc'];
   Module['_port_display_sharp'] = _port_display_sharp = wasmExports['port_display_sharp'];
   Module['_port_option_set'] = _port_option_set = wasmExports['port_option_set'];
+  Module['_port_motion_add'] = _port_motion_add = wasmExports['port_motion_add'];
   Module['_port_thread_dump'] = _port_thread_dump = wasmExports['port_thread_dump'];
   Module['_port_set_pad'] = _port_set_pad = wasmExports['port_set_pad'];
   Module['_port_vi_retrace'] = _port_vi_retrace = wasmExports['port_vi_retrace'];
@@ -2384,6 +2387,7 @@ function assignWasmExports(wasmExports) {
   Module['_rtw_save_load'] = _rtw_save_load = wasmExports['rtw_save_load'];
   Module['_rtw_start'] = _rtw_start = wasmExports['rtw_start'];
   Module['_rtw_input'] = _rtw_input = wasmExports['rtw_input'];
+  Module['_rtw_motion'] = _rtw_motion = wasmExports['rtw_motion'];
   Module['_rtw_option'] = _rtw_option = wasmExports['rtw_option'];
   Module['_rtw_pause'] = _rtw_pause = wasmExports['rtw_pause'];
   Module['_rtw_resize'] = _rtw_resize = wasmExports['rtw_resize'];
