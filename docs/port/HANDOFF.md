@@ -7,6 +7,43 @@ default branch `web`; retrowser build on the orphan branch `rtw-dist`; MIT licen
 orchestrator pushes, only to `pub`; never to `origin` (ethteck). Rebuild `rtw-dist` with `port/rtw/build.sh` (check
 `--rom` OK) after port changes. Older entries saying "private" / "never push" describe the state at their time.
 
+## F1 + R2 + F2 — 2026-11-09: touch camera, renderer polish, sharp pixels, e2e pacing check
+
+**F1** (worktree, merged by the orchestrator in aa567d1; notes `docs/port/notes/F1.md`): the game already has a zoom
+toggle ("Z Button Setup: Hold / Switch") and inverted Y ("Control Stick Setup") in its own Options menu, so no port
+option for them. New: port options (`port/ultra/pc_options.c`, `rtw_option` / `rtw_option_changed`, harness
+`--option ID=V`, not in the FlashRAM save) and option 1 **Snap button** (`controls.extra` bit 16: hold = zoom + aim,
+release = A, then zoom out; a pad transformation active only while player.c reports camera control), shown as a row
+of the game's Options menu drawn with the game's 12-px font copied from the ROM. e2e: touch Snap button, options
+phase. Open: Snap button placement on real phones; a 32-pixel name-card difference traced to a layout-sensitive read.
+
+**R2** (worktree, merged in c6b3e0f; notes `docs/port/notes/R2.md`, RENDERER.md "Session R2"): `G_TF_BILERP` is the
+RDP's 3-point filter (shader, test `three_point_filter`); Snap uses no LOD / mip / detail. Analysed, not renderer bugs:
+cave floor "seam" (camera at ledge height), credits dots (allocator free-list pointers in empty bitmaps: wasm vs KSEG0
+addresses), tunnel colours (the ROM's vertex colours). Beach route 2810, save 17961, flash identical.
+
+**F2** (this session, on `web`; notes `docs/port/notes/F2.md`). Commits 598921f (Options menu function names),
+33c253e (e2e pacing check), 3a31039 (Pixels option), and this docs commit.
+1. **Option 2 "Pixels: Smooth / Sharp"** (default Smooth = old picture, byte-identical): Sharp = nearest upscale by
+   ceil(fit) then linear down to the 4:3 fit ("sharp bilinear"), only in `vi_frame`'s final blit; in retrowser the
+   canvas becomes the view x dpr so it is shown 1:1. Options row "Pixels" below Snap Button (live preview, B restores,
+   Return commits -> `rtw_option_changed 2`); Return and the description box moved 16 px down. Harness `--option 2=1`.
+2. **e2e pacing check**: 60 +- 2 retraces/s, no idle wake-ups (wake-ups - catch-up retraces <= 3 + 2 %), display-paced
+   (>= 60 % of display frames start a retrace); timer retraces = deficit + late display frames, no fixed limit.
+   Mutants (idle chain, timer-paced) fail it.
+
+Verified: Beach route default = pre-F2 build byte for byte (7 PNGs, WAV, flash), Pidgey 2810, save 17961 MD4 OK; with
+`--option 2=1` read-back journal, flash and WAV identical, 2810. gfx tests ALL OK (+ `present_sharp`), port-test 5000
+OK (both settings), matching build OK, `port/rtw/build.sh` check OK (.z64 + .n64, build id fdd53211...), romscan 0;
+**e2e 5/5 PASS**; `PHASES=beach` portrait dpr-3 screenshots Smooth vs Sharp looked at. **rtw-dist must be rebuilt /
+pushed by the orchestrator** (manifest option 2, glue, wasm).
+
+### Next
+1. Try Sharp on a real phone (GPU cost, WebKit); consider making Sharp the default on touch if the user wants it.
+2. The e2e `touch` phase still runs with dpr 1 in the game frame (emulation limit); `beach` shows how to get dpr 3.
+
+Downloads: none.
+
 ## S10a — 2026-11-09: every course and screen reached; survey (no blocker found)
 
 Notes, per-course table, routes and the prioritized bug list: **docs/port/notes/S10a.md**. Commits: 286c28e (docs:

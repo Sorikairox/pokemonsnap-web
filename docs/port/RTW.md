@@ -45,6 +45,7 @@ Needs `./pokemonsnap.z64` (`port/docker/run.sh rom PATH`) and the local retrowse
 | `license`, `source` | `MIT`, github.com/Sorikairox/pokemonsnap-web | public repo |
 | `controls.extra` | bit 16 "Snap" | F1: the Snap button (FEATURES.md) |
 | `options` | id 1 "Snap button", bool, default 1, `inGame` | F1: shown in the game's Options menu, kept by the host |
+| | id 2 "Sharp pixels", bool, default 0, `inGame` | F2: the Options menu's "Pixels Smooth / Sharp" row, kept by the host |
 | no `net`, `picture`, `icon` | | nothing needs them yet |
 
 ## Build (`port_build.py --rtw`, `link_rtw`)
@@ -71,20 +72,24 @@ Shared-code hooks (weak defaults keep the harness as it was): `port_vbe_fix_defe
   retrace for half a field after the next is due and cleared unfired when a display frame comes first; it runs a
   retrace only to catch up (30 Hz host, slow frame) or when no display frames come for 100 ms. Paused: no timer.
   Every 600 retraces: `rtw: pacing N retraces: R retraces/s, D display frames/s, timer wake-ups T/s (K ran a
-  retrace), L late`. Measured in headless Chrome (SwiftShader): 59.6-60.1 retraces/s on 56-59 display frames/s,
+  retrace), L late`. e2e (F2) checks R = 60 +- 2, wake-ups - K <= 3 + 2 % (no idle chain) and 600 - K >= 60 % of the display
+  frames (display-paced); K itself is no limit: it is the display deficit plus every display frame more than half a
+  field late (headless Chrome: K 28 / 107 / 193 on one build). Measured in headless Chrome (SwiftShader): 59.6-60.1 retraces/s on 56-59 display frames/s,
   1.5-9.8 timer wake-ups/s, every one of them ran a catch-up retrace (no idle wake-ups).
 - **Input**: port 0 only (the game has one controller); buttons as sent (OSContPad bits); stick -127..127 scaled to
   an N64 stick's +-80. The first 200 pad changes are logged (`rtw: pad0 buttons XXXX stick X,Y (retrace N)`).
 - **Video**: `rtw_resize(w, h, dpr)` -> a 4:3 canvas of the view x dpr (320x240 .. 1280x960), applied before the
-  next retrace; the VI blit letterboxes to 4:3 (render only: the N64 images stay at their native size). In the
+  next retrace; the VI blit letterboxes to 4:3 (render only: the N64 images stay at their native size). F2, option 2
+  Sharp: the canvas is the view x dpr itself (any shape, at most 4096 a side) so the page shows it 1:1; the glue reads
+  `port_display_sharp()` (exported) before every retrace and resizes when it changes (the menu's live preview too). In the
   headless phone emulation the sandbox reported dpr 1 (canvas 392x294 / 420x315).
 - **Audio**: `rtw_audio_rate/drain/buffer` from S7 (32006 Hz, int16 stereo, 16384-frame ring).
 - **Save**: `rtw_save_ptr/size/generation` from S8. A whole save happens inside one retrace, and retraces never run
   inside a host call, so the host only ever sees complete images.
 - **Rumble**: `__osMotorAccess` -> `port_rumble` -> `rtw_rumble(channel, on)`. Not reached: the port reports no pak,
   and the game never starts the motor (`contRumbleStart` has no caller; only `scPreNMIDefault` sends init + stop).
-- **Options** (F1): export `rtw_option(id, value)` -> `port_option_set` (pc_options.c); import `rtw_option_changed`
-  called when the game's Options menu changes one. `rtw_input` passes bit 16 (Snap) to `port_set_pad`.
+- **Options** (F1, F2): export `rtw_option(id, value)` -> `port_option_set` (pc_options.c); import
+  `rtw_option_changed` called when the game's Options menu changes one (1 Snap button, 2 Pixels). `rtw_input` passes bit 16 (Snap) to `port_set_pad`.
 - **Imports**: `rtw_log`, `rtw_build_id`, `rtw_rumble`, `rtw_option_changed`. Not used yet: `rtw_export_file` (album photos as PNG would
   be a feature behind an option).
 - Test hooks: `Module.rtwManual` (no pacing; `node_host.mjs` steps `_port_rtw_retrace` itself), `port_rtw_test_log`.
