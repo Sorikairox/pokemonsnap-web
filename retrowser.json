@@ -44,8 +44,7 @@
       },
       {
         "bit": 17,
-        "label": "Shutter",
-        "place": "corner"
+        "label": "Shutter"
       }
     ]
   },
