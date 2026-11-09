@@ -136,6 +136,33 @@ function snapCheck(file) {
 }
 const errors = [];
 
+// Pacing (rtw_glue.js; guide section 3, traps 13 and 14). The line covers a window of 600 retraces:
+//   "rtw: pacing N retraces: R retraces/s, D display frames/s, timer wake-ups T/s (K ran a retrace), L late"
+// What must hold, whatever the display does:
+//  - the game runs at the console's rate: R = 60 (+-2);
+//  - no idle timer chain: every wake-up runs a catch-up retrace (wake-ups - K <= 3 + 2 %; the rates are rounded);
+//  - the display frames pace the game: most retraces are started by one (600 - K >= 60 % of the display frames).
+// The number of timer retraces K is NOT a fixed limit: it is the display deficit (60 - D per second) plus every
+// display frame that came more than half a field late (its retrace already ran on the timer). Headless Chrome's
+// frame times are irregular under SwiftShader: the same build measured K = 28, 107 and 193 per window (D 57.0, 49.3,
+// 56.6), all with every wake-up running a retrace. A timer-paced loop (trap 13) has 600 - K near 0; an idle chain
+// (trap 14) has wake-ups >> K.
+function pacingVerdict(line) {
+  const m = line && line.match(/([\d.]+) retraces\/s, ([\d.]+) display frames\/s, timer wake-ups ([\d.]+)\/s \((\d+) ran a retrace\)/);
+  if (!m) return { ok: false, detail: line ?? 'no pacing line' };
+  const [R, D, T, K] = [+m[1], +m[2], +m[3], +m[4]];
+  const secs = 600 / R, woke = T * secs, frames = D * secs, byDisplay = 600 - K;
+  const idle = woke - K, deficit = Math.max(0, (R - D) * secs);
+  const rateOk = Math.abs(R - 60) <= 2;
+  const idleOk = idle <= 3 + 0.02 * woke;
+  const displayOk = byDisplay >= 0.6 * Math.min(frames, 600);
+  const detail = `${line.replace(/^.*rtw: pacing /, '')} -> ${secs.toFixed(1)} s: ${Math.round(woke)} wake-ups, ` +
+    `${Math.round(idle)} idle${idleOk ? '' : ' (IDLE CHAIN)'}; ${byDisplay} retraces started by ${Math.round(frames)} display ` +
+    `frames${displayOk ? '' : ' (NOT DISPLAY-PACED)'}; timer retraces ${K} = deficit ${Math.round(deficit)} + ` +
+    `${Math.max(0, Math.round(K - deficit))} late display frames${rateOk ? '' : '; RATE OFF'}`;
+  return { ok: rateOk && idleOk && displayOk, detail };
+}
+
 async function desk() {
   const ctx = await newCtx();
   const page = await ctx.newPage();
@@ -163,8 +190,8 @@ async function desk() {
     const a1 = await audioState(page);
     check('audio: the host drains and plays', (a1.played ?? 0) > (a0.played ?? 0) || (a1.queuedMs ?? 0) > 0, JSON.stringify(a1));
     const pace = await L.wait(/rtw: pacing/, 30);
-    const m = pace && pace.match(/([\d.]+) retraces\/s, ([\d.]+) display frames\/s, timer wake-ups ([\d.]+)\/s/);
-    check('pacing: ~60 retraces/s on display frames, few timer wake-ups', m && Math.abs(+m[1] - 60) < 3 && +m[3] < 10, pace ?? 'no pacing line');
+    const pv = pacingVerdict(pace);
+    check('pacing: 60 retraces/s, started by display frames, every timer wake-up a catch-up retrace', pv.ok, pv.detail);
     // pause: the host's pause button -> rtw_pause(1): no retraces until resumed
     await page.click('[data-action=pause]'); await sleep(2500);
     await page.click('[data-action=pause]'); await sleep(500);
