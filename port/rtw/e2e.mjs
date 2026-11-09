@@ -11,12 +11,17 @@
 //                the Snap extra button (F1) is shown and reaches the pad as bit 16;
 //         options  (F1) the host passes option 1 at start, the game's Options menu changes it (rtw_option_changed),
 //                the host remembers it across a reload; the Snap key (Digit1) reaches the pad;
+//                (F2) option 2 "Pixels" likewise (Smooth -> Sharp), and Sharp is visible: the canvas takes the view's
+//                size and the picture's neighbouring pixels are equal far more often than with Smooth;
 //         wrong  a ROM with one byte changed: the host's wrong-ROM warning, then the module's plain refusal;
 //         offline  every server stopped, the network off: reload, boot from the caches and the remembered ROM.
+//         beach  (F2, not in the default list) phone portrait 390x844 at dpr 3, the SAVE continued to the Beach with
+//                Pixels Smooth and then Sharp (the host's stored option): screenshots to compare by eye.
 // Screenshots and the stored save go to the out dir (game pictures: local only, never commit). Every server and
 // Chrome it starts is stopped at the end. Prints PASS / FAIL lines.
 import { createRequire } from 'node:module';
 import { execFileSync } from 'node:child_process';
+import { inflateSync } from 'node:zlib';
 import { existsSync, mkdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -135,6 +140,44 @@ function snapCheck(file) {
   try { return execFileSync('python3', ['-I', join(ROOT, 'port/save/snap_save.py'), file], { encoding: 'utf8' }); } catch (e) { return String(e.stdout || e); }
 }
 const errors = [];
+
+// F2: decode a PNG screenshot (8-bit RGB / RGBA, not interlaced: what Chrome writes) and measure how often a pixel
+// equals its right-hand neighbour exactly. A nearest-neighbour picture is made of flat runs (each N64 pixel 2-4 screen
+// pixels wide); a linearly filtered one differs a little almost everywhere.
+function pngPixels(file) {
+  const b = readFileSync(file);
+  let i = 8, w = 0, h = 0, ct = 0;
+  const idat = [];
+  while (i < b.length) {
+    const n = b.readUInt32BE(i), t = b.toString('ascii', i + 4, i + 8), d = b.subarray(i + 8, i + 8 + n);
+    if (t === 'IHDR') { w = d.readUInt32BE(0); h = d.readUInt32BE(4); ct = d[9]; if (d[8] !== 8 || d[12]) throw new Error('png format'); }
+    if (t === 'IDAT') idat.push(d);
+    i += 12 + n;
+  }
+  const bpp = ct === 6 ? 4 : 3, stride = w * bpp, raw = inflateSync(Buffer.concat(idat)), px = Buffer.alloc(h * stride);
+  for (let y = 0; y < h; y++) {
+    const f = raw[y * (stride + 1)], src = raw.subarray(y * (stride + 1) + 1, (y + 1) * (stride + 1)), o = y * stride;
+    for (let x = 0; x < stride; x++) {
+      const a = x >= bpp ? px[o + x - bpp] : 0, up = y ? px[o - stride + x] : 0, c = x >= bpp && y ? px[o - stride + x - bpp] : 0;
+      let v = src[x];
+      if (f === 1) v += a; else if (f === 2) v += up; else if (f === 3) v += (a + up) >> 1;
+      else if (f === 4) { const p = a + up - c, pa = Math.abs(p - a), pb = Math.abs(p - up), pc = Math.abs(p - c); v += pa <= pb && pa <= pc ? a : pb <= pc ? up : c; }
+      px[o + x] = v & 255;
+    }
+  }
+  return { w, h, bpp, px };
+}
+function flatness(file) {   // share of horizontal neighbour pairs with the same colour (non-black pixels only)
+  const { w, h, bpp, px } = pngPixels(file);
+  let same = 0, n = 0;
+  for (let y = 0; y < h; y++) for (let x = 0; x + 1 < w; x++) {
+    const o = (y * w + x) * bpp;
+    if (px[o] + px[o + 1] + px[o + 2] < 24) continue;   // the letterbox
+    n++;
+    if (px[o] === px[o + bpp] && px[o + 1] === px[o + bpp + 1] && px[o + 2] === px[o + bpp + 2]) same++;
+  }
+  return n ? same / n : 0;
+}
 
 // Pacing (rtw_glue.js; guide section 3, traps 13 and 14). The line covers a window of 600 retraces:
 //   "rtw: pacing N retraces: R retraces/s, D display frames/s, timer wake-ups T/s (K ran a retrace), L late"
@@ -329,8 +372,9 @@ async function options() {
     await press(page, 'Enter', 200); await sleep(2500);
     await press(page, 'ArrowDown'); await sleep(1500);
     await press(page, 'KeyX'); await sleep(3500);
-    await shot(page, `options-${tag}`);
+    menuShots.push(await shot(page, `options-${tag}`));
   };
+  const menuShots = [];
   try {
     await openGame(page, { remember: true });
     await page.waitForSelector('[data-state=playing]', { timeout: 180000 });
@@ -347,10 +391,19 @@ async function options() {
     await press(page, 'ArrowRight'); await sleep(1200);
     await shot(page, 'options-snap-off');
     await press(page, 'KeyX'); await sleep(1200);
+    // F2: the Pixels row (below Snap Button): Smooth -> Sharp, previewed at once like the Sound row
+    await press(page, 'ArrowDown'); await sleep(1000);
+    await shot(page, 'options-pixels-row');
+    await press(page, 'KeyX'); await sleep(1200);
+    await press(page, 'ArrowRight'); await sleep(1500);
+    await shot(page, 'options-pixels-sharp');
+    await press(page, 'KeyX'); await sleep(1200);
     await press(page, 'ArrowDown'); await sleep(1000);    // Return
     await press(page, 'KeyX');
     const ch = await L.wait(/rtw: option 1 = 0 changed in the game's Options menu/, 20);
     check('options: the game\'s menu reports the change (rtw_option_changed 1 = 0)', !!ch, ch ?? 'no line');
+    const ch2 = await L.wait(/rtw: option 2 = 1 changed in the game's Options menu/, 20);
+    check('options: Pixels -> Sharp is reported (rtw_option_changed 2 = 1)', !!ch2, ch2 ?? 'no line');
     await sleep(2000);
     await L.reset();
     await page.reload();
@@ -360,9 +413,58 @@ async function options() {
     const t1 = await L.text();
     check('options: after a reload the host passes the remembered value (rtw_option 1 = 0)', /rtw: option 1 = 0 from the host/.test(t1),
       (t1.match(/rtw: option.*/) || ['no rtw_option line'])[0]);
-    await toOptions('menu-reload');   // the row shows Off
+    check('options: after a reload the host passes Pixels Sharp (rtw_option 2 = 1)', /rtw: option 2 = 1 from the host/.test(t1),
+      (t1.match(/rtw: option 2.*/) || ['no rtw_option 2 line'])[0]);
+    await toOptions('menu-reload');   // the rows show Off and Sharp
+    // Sharp visible: the canvas has the view's size (not the Smooth 4:3 one) and the same menu screen is made of flat
+    // runs of pixels (Smooth: options-menu, the first visit; Sharp: options-menu-reload)
+    const t2 = await L.text();
+    const cv = [...t2.matchAll(/rtw: canvas (\d+)x(\d+)/g)].map((m) => [+m[1], +m[2]]);
+    const last = cv[cv.length - 1];
+    const fs = flatness(menuShots[0]), fh = flatness(menuShots[1]);
+    check('options: Sharp is visible (canvas at the view size, flat pixel runs)', last && last[0] * 3 !== last[1] * 4 && fh > fs + 0.15,
+      `canvas ${last ? last.join('x') : '?'}; equal neighbours ${(fs * 100).toFixed(0)} % Smooth, ${(fh * 100).toFixed(0)} % Sharp`);
     writeFileSync(join(outDir, 'log-options.txt'), await L.text());
   } finally { L.stop(); await ctx.close(); }
+}
+
+// F2: a Beach frame in phone portrait, Pixels Smooth then Sharp (the host's stored inGame option, as after a change in
+// the game's menu). The save continues to Oak's lab; A every 2 s then reaches the Beach as in the harness route
+// (port_work/merge_all/config.json: A every 120 retraces). Pictures only: look at them.
+// Its own Chrome with --force-device-scale-factor=3: with the emulated deviceScaleFactor alone the sandboxed game
+// frame reports devicePixelRatio 1 (rtw_resize dpr 100, canvas 392x294, upscaled 3x by the browser), unlike a phone;
+// the emulated factor is kept so the screenshots have the device pixels.
+async function beach() {
+  const phone = await chromium.launch({ executablePath: chromePath, headless: true, args: [...launchArgs, '--force-device-scale-factor=3'] });
+  try {
+  for (const [tag, sharp] of [['smooth', 0], ['sharp', 1]]) {
+    const ctx = await phone.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 3, hasTouch: true, reducedMotion: 'reduce' });
+    await ctx.addInitScript((ep) => { try { if (location.hostname === 'localhost') localStorage.setItem('rtw:test-endpoints', ep); } catch { /* */ } }, endpoints);
+    await ctx.addInitScript((v) => { try { localStorage.setItem('rtw:options:pokemonsnap-us', JSON.stringify({ 2: v })); } catch { /* */ } }, sharp);
+    const page = await ctx.newPage();
+    page.on('pageerror', (e) => errors.push(e.message));
+    const L = logger(page);
+    try {
+      await openGame(page, { remember: false });
+      await page.waitForSelector('[data-state=playing]', { timeout: 180000 });
+      await L.wait(/rtw: game started/, 90);
+      await page.click('[data-action=menu]'); await sleep(500);
+      await page.setInputFiles('[data-field=import-save]', SAVE);
+      await L.wait(/rtw: game started.*save from the host/, 90);
+      if (await page.$('[data-action=close-menu]')) await page.click('[data-action=close-menu]', { timeout: 5000 }).catch(() => {});
+      const view = await page.evaluate(() => `${innerWidth}x${innerHeight} css px, dpr ${devicePixelRatio}`);
+      const t0 = Date.now();
+      while (Date.now() - t0 < 75000) { await press(page, 'KeyX'); await sleep(2000); }
+      await shot(page, `beach-${tag}`, true);
+      await sleep(5000);
+      await shot(page, `beach-${tag}-b`);   // the picture only, at the page's device pixels
+      const t = await L.text();
+      check(`beach ${tag}: option 2 = ${sharp} from the host`, new RegExp(`rtw: option 2 = ${sharp} from the host`).test(t),
+        `${view}; ` + [...t.matchAll(/rtw: (option 2|canvas).*/g)].map((m) => m[0]).join('; '));
+      writeFileSync(join(outDir, `log-beach-${tag}.txt`), t);
+    } finally { L.stop(); await ctx.close(); }
+  }
+  } finally { await phone.close().catch(() => {}); }
 }
 
 async function wrong() {
@@ -413,7 +515,7 @@ async function offline() {
 try {
   for (const p of PHASES) {
     console.log(`== ${p}`);
-    try { await ({ desk, title, touch, options, wrong, offline })[p](); } catch (e) { check(`${p}: ran`, false, e.stack || String(e)); }
+    try { await ({ desk, title, touch, options, beach, wrong, offline })[p](); } catch (e) { check(`${p}: ran`, false, e.stack || String(e)); }
   }
   check('no page errors', errors.length === 0, errors.slice(0, 3).join(' | '));
 } finally {

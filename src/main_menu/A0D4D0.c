@@ -48,21 +48,24 @@ extern Sprite D_80342FF0_main_menu_vpk0;
 extern Sprite D_803434D0_main_menu_vpk0;
 
 #ifdef PORT
-/* port (F1, docs/port/notes/F1.md): the "Snap Button" row of the Options menu (port option 1, port/ultra/pc_options.c;
- * not in the save). The menu's own rows are pictures from the ROM; this row's words are the port's own, drawn when the
- * menu opens with the game's 12-pixel font (window/text.c's glyphs and widths; the window overlay is not loaded in
- * this scene, so port_menu_font12 copies the glyphs from the player's ROM) into RGBA16 sprites placed and coloured
- * like the menu's own. The row sits between "Control Stick Setup" and "Return" (which moves down one row); the
- * logic is in A0E190.c (row index 5). */
+/* port (F1, docs/port/notes/F1.md; F2, notes/F2.md): the "Snap Button" and "Pixels" rows of the Options menu (port
+ * options 1 and 2, port/ultra/pc_options.c; not in the save). The menu's own rows are pictures from the ROM; these
+ * rows' words are the port's own, drawn when the menu opens with the game's 12-pixel font (window/text.c's glyphs and
+ * widths; the window overlay is not loaded in this scene, so port_menu_font12 copies the glyphs from the player's ROM)
+ * into RGBA16 sprites placed and coloured like the menu's own. The rows sit between "Control Stick Setup" and
+ * "Return" (which moves down two rows, with the description box); the logic is in A0E190.c (row indices 5, 6). */
 #define PORT_OPT_SNAP_BUTTON 1
+#define PORT_OPT_PIXELS 2  /* F2: "Pixels: Smooth / Sharp" (display only) */
+#define PORT_OPT_ROWS 2    /* rows 5, 6 */
+#define PORT_OPT_BOX_DY 16 /* F2: the description box moves down to make room for the second row */
 s32 UIText_GetCharIndex(s32 ch);
 s32 UIText_Ascii2WideChar(s32 c);
 extern u8 UIText_WidthTable[2][370];
 void* port_menu_font12(void);
 void* port_menu_alloc(s32 slot, s32 bytes);
 s32 port_option_get(s32 id);
-GObj* port_OptSnapValues; /* "< On >", "< Off >" (as D_800E8358_A0F8E8 for Sound) */
-GObj* port_OptSnapHelp;   /* what On / Off do, shown while choosing (as D_800E834C_A0F8DC) */
+GObj* port_OptValues[PORT_OPT_ROWS]; /* "< On >", "< Off >" (as D_800E8358_A0F8E8 for Sound) */
+GObj* port_OptHelp[PORT_OPT_ROWS];   /* what each value does, shown while choosing (as D_800E834C_A0F8DC) */
 
 #define PORT_TEXT_SHADOW 0x0001 /* black, opaque: window/text.c's shadow palette on a clear image */
 
@@ -176,73 +179,126 @@ static void portTextSprite(Sprite* spr, s32 slot, s32 w, s32 h, char* str, s32 x
     spr->frac_s = spr->frac_t = 0;
 }
 
-/* "<  On  >": brackets at the edges like the menu's "< Mono >" */
-static void portValueSprite(Sprite* spr, s32 slot, char* word) {
-    portTextSprite(spr, slot, 64, 16, word, 28, 1, true);
+/* "<  On  >": brackets at the edges like the menu's "< Mono >"; the word centred at `centre`, '>' at `right` */
+static void portValueSprite(Sprite* spr, s32 slot, char* word, s32 centre, s32 right) {
+    portTextSprite(spr, slot, 64, 16, word, centre, 1, true);
     {
         u8* font = port_menu_font12();
         u16* img = (u16*) (spr->bitmap + spr->nbitmaps);
         if (font != NULL) {
             portTextGlyph(img, 64, 16, 0, 1, font + UIText_GetCharIndex(UIText_Ascii2WideChar('<')) * 72);
-            portTextGlyph(img, 64, 16, 51, 1, font + UIText_GetCharIndex(UIText_Ascii2WideChar('>')) * 72);
+            portTextGlyph(img, 64, 16, right, 1, font + UIText_GetCharIndex(UIText_Ascii2WideChar('>')) * 72);
         }
     }
 }
 
 void func_800E643C_A0D9CC(SObj* sobj, s8 arg1);
 
-void port_OptionsCreateSnapRow(void) {
+/* the port's rows, in screen order below "Control Stick Setup" (row index 5 + i in A0E190.c) */
+typedef struct {
+    s32 option;      /* port option id (pc_options.c) */
+    s32 leftIsOne;   /* the left value means option value 1 (Snap: On / Off) or 0 (Pixels: Smooth / Sharp) */
+    char* label;
+    char* values[2]; /* left, right */
+    s32 centre, right; /* value sprites: the word's centre, the '>' */
+    char* help;      /* the row's description */
+    char* valueHelp[2];
+} PortOptRowText;
+
+static PortOptRowText portOptRows[PORT_OPT_ROWS] = {
+    { PORT_OPT_SNAP_BUTTON, true, "Snap Button", { "On", "Off" }, 28, 51,
+      "Snap: an extra touch button (key 1).\nHold to aim, let go to take a picture.",
+      { "On: hold Snap to zoom in and aim,\nlet go of it to take a picture.",
+        "Off: the Snap button does nothing.\nUse Z and A to take pictures." } },
+    /* F2: "Smooth" is 44 pixels wide: the brackets sit 1 pixel further out than Snap's (the native "<Reverse>" is as
+     * tight) */
+    { PORT_OPT_PIXELS, false, "Pixels", { "Smooth", "Sharp" }, 29, 52,
+      "Pixels: how the game's picture is\nenlarged to fit your screen.",
+      { "Smooth: soft, blended pixels,\nlike the picture on a TV.",
+        "Sharp: crisp, square pixels.\nPhotos and scores do not change." } },
+};
+
+static void portMoveY(GObj* gobj, s32 dy) {
+    SObj* sobj;
+
+    for (sobj = gobj->data.sobj; sobj != NULL; sobj = sobj->next) {
+        sobj->sprite.y += dy;
+    }
+}
+
+/* F1 + F2: rows 5 ("Snap Button", option 1) and 6 ("Pixels", option 2) between "Control Stick Setup" (y 121) and
+ * "Return", 16 pixels apart like the native rows; "Return" and the description box below them move down 32 pixels
+ * (the box then spans y 182-213 of 240: inside the picture, clear of the rows) */
+void port_OptionsCreateRows(void) {
     Sprite spr;
     SObj* sobj;
-    s32 on = port_option_get(PORT_OPT_SNAP_BUTTON);
+    s32 i, k, y, value;
+    PortOptRowText* row;
 
-    /* "Return" (the 5th label) moves down a row; the new label becomes label 5 (D_800E8378_A0F908[5]) */
+    /* "Return" (the 5th label) moves down; the new labels become labels 5, 6 (D_800E8378_A0F908[5], [6]) */
     sobj = D_800E8340_A0F8D0->data.sobj->next->next->next->next;
-    SET_SPRITE_POS(sobj->sprite, 43, 153);
-    portTextSprite(&spr, 0, 128, 16, "Snap Button", 7, 1, false);
-    {
-        /* the rows' bullet: a 2 x 2 dot with its shadow */
-        u16* img = (u16*) (spr.bitmap + spr.nbitmaps);
-        img[6 * 128 + 2] = img[6 * 128 + 3] = img[7 * 128 + 2] = img[7 * 128 + 3] = 0xFFFF;
-        img[7 * 128 + 4] = img[8 * 128 + 4] = img[8 * 128 + 3] = PORT_TEXT_SHADOW;
+    SET_SPRITE_POS(sobj->sprite, 43, 137 + 16 * PORT_OPT_ROWS);
+    /* the description box: the frame's lower line, its bottom line and its two sides (D_800E8338_A0F8C8 sprites 2-5),
+     * and every description sprite */
+    sobj = D_800E8338_A0F8C8->data.sobj->next->next;
+    for (k = 0; k < 4; k++, sobj = sobj->next) {
+        sobj->sprite.y += PORT_OPT_BOX_DY;
     }
-    sobj = omGObjAddSprite(D_800E8340_A0F8D0, &spr);
-    SET_SPRITE_POS(sobj->sprite, 43, 136);
-    sobj->sprite.red = sobj->sprite.green = sobj->sprite.blue = 0x80;
+    portMoveY(D_800E8344_A0F8D4, PORT_OPT_BOX_DY);
+    portMoveY(D_800E8348_A0F8D8, PORT_OPT_BOX_DY);
+    portMoveY(D_800E834C_A0F8DC, PORT_OPT_BOX_DY);
+    portMoveY(D_800E8350_A0F8E0, PORT_OPT_BOX_DY);
+    portMoveY(D_800E8354_A0F8E4, PORT_OPT_BOX_DY);
 
-    sobj = omGObjAddSprite(D_800E8338_A0F8C8, &D_8033ED70_main_menu_vpk0); /* the row's ":" */
-    SET_SPRITE_POS(sobj->sprite, 158, 139);
-    sobj->sprite.attr = SP_TEXSHUF | SP_TRANSPARENT;
+    for (i = 0; i < PORT_OPT_ROWS; i++) {
+        row = &portOptRows[i];
+        y = 136 + 16 * i;
+        value = port_option_get(row->option);
+        portTextSprite(&spr, 6 * i, 128, 16, row->label, 7, 1, false);
+        {
+            /* the rows' bullet: a 2 x 2 dot with its shadow */
+            u16* img = (u16*) (spr.bitmap + spr.nbitmaps);
+            img[6 * 128 + 2] = img[6 * 128 + 3] = img[7 * 128 + 2] = img[7 * 128 + 3] = 0xFFFF;
+            img[7 * 128 + 4] = img[8 * 128 + 4] = img[8 * 128 + 3] = PORT_TEXT_SHADOW;
+        }
+        sobj = omGObjAddSprite(D_800E8340_A0F8D0, &spr);
+        SET_SPRITE_POS(sobj->sprite, 43, y);
+        sobj->sprite.red = sobj->sprite.green = sobj->sprite.blue = 0x80;
 
-    /* value 0 (left) = On, 1 = Off, as the Sound row's Stereo / Mono */
-    portValueSprite(&spr, 1, "On");
-    port_OptSnapValues = ohCreateSprite(0xE, ohUpdateDefault, 0, 0x80000000, renDrawSprite, 1, 0x80000000, -1, &spr, 0,
-                                        NULL, 1);
-    sobj = port_OptSnapValues->data.sobj;
-    SET_SPRITE_POS(sobj->sprite, 162, 136);
-    func_800E643C_A0D9CC(sobj, !on);
-    portValueSprite(&spr, 2, "Off");
-    sobj = omGObjAddSprite(port_OptSnapValues, &spr);
-    SET_SPRITE_POS(sobj->sprite, 221, 136);
-    func_800E643C_A0D9CC(sobj, on);
+        sobj = omGObjAddSprite(D_800E8338_A0F8C8, &D_8033ED70_main_menu_vpk0); /* the row's ":" */
+        SET_SPRITE_POS(sobj->sprite, 158, y + 3);
+        sobj->sprite.attr = SP_TEXSHUF | SP_TRANSPARENT;
 
-    /* the row's description (D_800E8344_A0F8D4, index 5) and its values' (shown while choosing) */
-    portTextSprite(&spr, 3, 256, 30, "Snap: an extra touch button (key 1).\nHold to aim, let go to take a picture.",
-                   8, 3, false);
-    sobj = omGObjAddSprite(D_800E8344_A0F8D4, &spr);
-    SET_SPRITE_POS(sobj->sprite, 41, 168);
-    sobj->sprite.attr |= SP_HIDDEN;
-    portTextSprite(&spr, 4, 256, 30, "On: hold Snap to zoom in and aim,\nlet go of it to take a picture.",
-                   8, 3, false);
-    port_OptSnapHelp = ohCreateSprite(0xE, ohUpdateDefault, 0, 0x80000000, renDrawSprite, 1, 0x80000000, -1, &spr, 0,
-                                      NULL, 1);
-    sobj = port_OptSnapHelp->data.sobj;
-    SET_SPRITE_POS(sobj->sprite, 41, 168);
-    sobj->sprite.attr |= SP_HIDDEN;
-    portTextSprite(&spr, 5, 256, 30, "Off: the Snap button does nothing.\nUse Z and A to take pictures.", 8, 3, false);
-    sobj = omGObjAddSprite(port_OptSnapHelp, &spr);
-    SET_SPRITE_POS(sobj->sprite, 41, 168);
-    sobj->sprite.attr |= SP_HIDDEN;
+        /* choice 0 = the left value, as the Sound row's Stereo / Mono; highlighted: the current one */
+        portValueSprite(&spr, 6 * i + 1, row->values[0], row->centre, row->right);
+        port_OptValues[i] = ohCreateSprite(0xE, ohUpdateDefault, 0, 0x80000000, renDrawSprite, 1, 0x80000000, -1, &spr,
+                                           0, NULL, 1);
+        sobj = port_OptValues[i]->data.sobj;
+        SET_SPRITE_POS(sobj->sprite, 162, y);
+        func_800E643C_A0D9CC(sobj, value != row->leftIsOne);
+        portValueSprite(&spr, 6 * i + 2, row->values[1], row->centre, row->right);
+        sobj = omGObjAddSprite(port_OptValues[i], &spr);
+        SET_SPRITE_POS(sobj->sprite, 221, y);
+        func_800E643C_A0D9CC(sobj, value == row->leftIsOne);
+
+        /* the row's description (D_800E8344_A0F8D4, index 5 + i) and its values' (shown while choosing) */
+        portTextSprite(&spr, 6 * i + 3, 256, 30, row->help, 8, 3, false);
+        sobj = omGObjAddSprite(D_800E8344_A0F8D4, &spr);
+        SET_SPRITE_POS(sobj->sprite, 41, 168 + PORT_OPT_BOX_DY);
+        sobj->sprite.attr |= SP_HIDDEN;
+        for (k = 0; k < 2; k++) {
+            portTextSprite(&spr, 6 * i + 4 + k, 256, 30, row->valueHelp[k], 8, 3, false);
+            if (k == 0) {
+                port_OptHelp[i] = ohCreateSprite(0xE, ohUpdateDefault, 0, 0x80000000, renDrawSprite, 1, 0x80000000,
+                                                 -1, &spr, 0, NULL, 1);
+                sobj = port_OptHelp[i]->data.sobj;
+            } else {
+                sobj = omGObjAddSprite(port_OptHelp[i], &spr);
+            }
+            SET_SPRITE_POS(sobj->sprite, 41, 168 + PORT_OPT_BOX_DY);
+            sobj->sprite.attr |= SP_HIDDEN;
+        }
+    }
 }
 #endif
 
@@ -510,7 +566,7 @@ void OptionsMenu_CreateSprites(void) { /* was func_800E6ADC_A0E06C */
     func_800E672C_A0DCBC();
     func_800E6880_A0DE10();
 #ifdef PORT
-    port_OptionsCreateSnapRow();
+    port_OptionsCreateRows();
 #endif
 }
 
@@ -530,8 +586,10 @@ s32 OptionsMenu_Main(void) { /* was func_800E6B2C_A0E0BC */
     omDeleteGObj(D_800E835C_A0F8EC);
     omDeleteGObj(D_800E8360_A0F8F0);
 #ifdef PORT
-    omDeleteGObj(port_OptSnapValues);
-    omDeleteGObj(port_OptSnapHelp);
+    omDeleteGObj(port_OptValues[0]);
+    omDeleteGObj(port_OptHelp[0]);
+    omDeleteGObj(port_OptValues[1]);
+    omDeleteGObj(port_OptHelp[1]);
 #endif
     return 12;
 }

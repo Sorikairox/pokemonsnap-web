@@ -8,7 +8,10 @@
 #include <math.h>
 #include <stdarg.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <GLES3/gl3.h>
+#include <emscripten.h>
 #include <PR/mbi.h>
 #include <PR/sptask.h>
 #include <PR/ucode.h>
@@ -449,6 +452,56 @@ unsigned char *gfx_test_run(void) {
 /* ------------------------------------------------------------------ frame 2: formats, mirror, 2-cycle TEXEL1,
  * matrix stack, G_MW_MATRIX patch after gSPMvpRecalc, branch lists (second task, second framebuffer) */
 #define FB2_PHYS 0x3C0000u
+
+/* ------------------------------------------------------------------ option 2 "Pixels: Sharp" (F2): the present only
+ * Frame 2 shown with the sharp present at 640x480 (a whole 2x: nearest straight onto the canvas) and 1100x825 (3.44x:
+ * 4x nearest, then linear down). Across the left edge of the cyan square (N64 x 280; the row read from x 272, right of
+ * the yellow square) a canvas row has at most one blended pixel; the smooth present (GL_LINEAR) blends two or more at
+ * both sizes, so the check fails when the option is ignored. The colour image in RDRAM stays the same (display only). */
+static unsigned rdram_sum(uint32_t phys, int n) {
+    unsigned h = 2166136261u;
+    for (int i = 0; i < n; i++) h = (h ^ *(unsigned char *)rd(phys + (uint32_t)i)) * 16777619u;
+    return h;
+}
+static int edge_blends(int cw, int ch, int *inside_ok) {
+    int k = cw / 4 < ch / 3 ? cw / 4 : ch / 3, dw = k * 4, dh = k * 3, dx = (cw - dw) / 2, dy = (ch - dh) / 2;
+    int y = dy + (int)((159.5f / 240.0f) * dh);   /* N64 row 159: canvas row, from the top */
+    unsigned char row[1024 * 4];
+    int x0 = dx + (int)(272.0f / 320.0f * dw), x1 = dx + (int)(290.0f / 320.0f * dw), n = 0;
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+    glReadPixels(x0, ch - 1 - y, x1 - x0, 1, GL_RGBA, GL_UNSIGNED_BYTE, row);
+    unsigned char *bg = row, *cy = row + (x1 - x0 - 1) * 4;   /* the grey background, the cyan square */
+    for (int i = 0; i < x1 - x0; i++) {
+        unsigned char *p = row + i * 4;
+        int is_bg = 1, is_cy = 1;
+        for (int c = 0; c < 3; c++) {
+            if (abs(p[c] - bg[c]) > 2) is_bg = 0;
+            if (abs(p[c] - cy[c]) > 2) is_cy = 0;
+        }
+        if (!is_bg && !is_cy) n++;
+    }
+    *inside_ok = bg[0] >= 30 && bg[0] <= 50 && bg[1] >= 30 && bg[1] <= 50 && cy[0] < 30 && cy[1] > 200 && cy[2] > 200;
+    return n;
+}
+static void present_sharp_check(void) {
+    unsigned before = rdram_sum(FB2_PHYS, 320 * 240 * 2);
+    int ok[4], n[4], i = 0;
+    for (int sharp = 0; sharp < 2; sharp++) {
+        port_gfx_set_present_sharp(sharp);
+        port_gfx_vi_frame(rd(FB2_PHYS), 320);
+        n[i] = edge_blends(640, 480, &ok[i]), i++;
+        EM_ASM({ Module['canvas'].width = 1100; Module['canvas'].height = 825; });
+        port_gfx_vi_frame(rd(FB2_PHYS), 320);
+        n[i] = edge_blends(1100, 825, &ok[i]), i++;
+        EM_ASM({ Module['canvas'].width = 640; Module['canvas'].height = 480; });
+    }
+    port_gfx_set_present_sharp(0);
+    unsigned after = rdram_sum(FB2_PHYS, 320 * 240 * 2);
+    check("present_sharp", ok[0] && ok[1] && ok[2] && ok[3] && n[0] >= 2 && n[1] >= 2 && n[2] == 0 && n[3] <= 1 && before == after,
+          "blended pixels across an edge: sharp %d at 640x480, %d at 1100x825 (smooth %d, %d); colour image %s", n[2], n[3],
+          n[0], n[1], before == after ? "unchanged" : "CHANGED");
+}
+
 static Gfx dl2[2048], sub2[16], branch2[16];
 static void tex2(void) {
     for (int y = 0; y < 8; y++)   /* RGBA32 8x8: r = 32x, g = 32y, b = 128 */
@@ -692,6 +745,7 @@ unsigned char *gfx_test_run2(void) {
     }
     uint16_t y = fb_px(FB2_PHYS, 320, 255, 155), cy = fb_px(FB2_PHYS, 320, 285, 155), bg = fb_px(FB2_PHYS, 320, 5, 230);
     check("branch_list", y == rgba16(255, 255, 0, 1) && cy == rgba16(0, 255, 255, 1) && bg == rgba16(40, 40, 40, 1), "%04X %04X %04X", y, cy, bg);
+    present_sharp_check();
     port_gfx_vi_frame(rd(FB2_PHYS), 320);
     printf("CHECKS2 %s\n", checks_ok ? "ALL OK" : "SOME FAILED");
     return to_rgba(FB2_PHYS);

@@ -1110,7 +1110,7 @@ src/main_menu/A0BE70.c	func_800E5574_A0CB04	global	0		void (a value read reads 0
 src/main_menu/A0BE70.c	func_800E5C38_A0D1C8	global	0	call:omCreateProcess	returns v0: omCreateProcess
 src/main_menu/A0BE70.c	func_800E5C8C_A0D21C	global	0	call:fx_setDitherModes	void (a value read reads 0): a callee does not leave a value in v0 (fx_setDitherModes)
 src/main_menu/A0BE70.c	func_800E5D2C_A0D2BC	global	0	call:omDeleteGObj	void (a value read reads 0): a callee does not leave a value in v0 (omDeleteGObj)
-src/main_menu/A0D4D0.c	OptionsMenu_CreateSprites	global	0	call:func_800E6880_A0DE10	void (a value read reads 0): IR last calls ['@port_OptionsCreateSnapRow'] differ from the console ['@func_800E6880_A0DE10']
+src/main_menu/A0D4D0.c	OptionsMenu_CreateSprites	global	0	call:func_800E6880_A0DE10	void (a value read reads 0): IR last calls ['@port_OptionsCreateRows'] differ from the console ['@func_800E6880_A0DE10']
 src/main_menu/A0D4D0.c	func_800E5F40_A0D4D0	global	0	entry	void (a value read reads 0): console v0 not only a call result (entry)
 src/main_menu/A0D4D0.c	func_800E5F48_A0D4D8	global	0	call:ohCreateSprite	returns v0: ohCreateSprite
 src/main_menu/A0D4D0.c	func_800E5FDC_A0D56C	global	0	call:omGObjAddSprite	returns v0: omGObjAddSprite
@@ -1120,10 +1120,11 @@ src/main_menu/A0D4D0.c	func_800E643C_A0D9CC	global	0	set	void (a value read read
 src/main_menu/A0D4D0.c	func_800E6480_A0DA10	global	0	call:func_800E643C_A0D9CC	void (a value read reads 0): a callee does not leave a value in v0 (func_800E643C_A0D9CC)
 src/main_menu/A0D4D0.c	func_800E672C_A0DCBC	global	0	call:omGObjAddSprite	returns v0: omGObjAddSprite
 src/main_menu/A0D4D0.c	func_800E6880_A0DE10	global	0	call:omGObjAddSprite	returns v0: omGObjAddSprite
+src/main_menu/A0D4D0.c	portMoveY	static	0	-	void (a value read reads 0): no IDO object row
 src/main_menu/A0D4D0.c	portTextGlyph	static	0	-	void (a value read reads 0): no IDO object row
 src/main_menu/A0D4D0.c	portTextSprite	static	0	-	void (a value read reads 0): no IDO object row
 src/main_menu/A0D4D0.c	portValueSprite	static	0	-	void (a value read reads 0): no IDO object row
-src/main_menu/A0D4D0.c	port_OptionsCreateSnapRow	global	0	-	void (a value read reads 0): no IDO object row
+src/main_menu/A0D4D0.c	port_OptionsCreateRows	global	0	-	void (a value read reads 0): no IDO object row
 src/main_menu/A0E190.c	OptionsMenu_BlinkValue	global	0		void (a value read reads 0): console v0 not only a call result ()
 src/main_menu/A0E190.c	OptionsMenu_EditRow	global	0	call:ohWait	void (a value read reads 0): a callee does not leave a value in v0 (ohWait)
 src/main_menu/A0E190.c	OptionsMenu_InitValues	global	0	call:func_800E6C00_A0E190;call:func_800E6C14_A0E1A4	void (a value read reads 0): a callee does not leave a value in v0 (func_800E6C00_A0E190,func_800E6C14_A0E1A4)

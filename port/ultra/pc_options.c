@@ -7,6 +7,10 @@
  * host (port_option_changed: rtw_option_changed in the retrowser target, a log line in the harness).
  *
  *   id 1  PORT_OPT_SNAP_BUTTON  bool, default 1: the controls.extra button bit 16 "Snap" works
+ *   id 2  PORT_OPT_PIXELS       bool, default 0 (F2): 0 Smooth, 1 Sharp: how the picture is scaled onto the canvas
+ *                               (port/gfx vi_frame, port_gfx_set_present_sharp; display only, never the native images
+ *                               the game reads back). The Options row previews it live while it is being chosen
+ *                               (port_display_preview), as the game's Sound row does with Stereo / Mono.
  *
  * The Zoom toggle and the inverted stick Y the player asked for are the game's own Options rows ("Z Button Setup:
  * Hold / Switch", "Control Stick Setup: Reverse / Normal"; player flags in the save, read by app_level/player.c), so
@@ -22,14 +26,27 @@
 #include <emscripten.h>
 #include <stdlib.h>
 
-enum { PORT_OPT_SNAP_BUTTON = 1, PORT_OPT_COUNT };
+enum { PORT_OPT_SNAP_BUTTON = 1, PORT_OPT_PIXELS, PORT_OPT_COUNT };
 #define PORT_PAD_SNAP 0x10000
 #define Z_TRIG 0x2000
 #define A_BUTTON 0x8000
 
-static int opt_value[PORT_OPT_COUNT] = {0, 1};
+static int opt_value[PORT_OPT_COUNT] = {0, 1, 0};
 
-static int option_valid(int id, int value) { return id == PORT_OPT_SNAP_BUTTON && (value == 0 || value == 1); }
+static int option_valid(int id, int value) { return id > 0 && id < PORT_OPT_COUNT && (value == 0 || value == 1); }
+
+/* option 2: the present mode in use = the menu's live preview while it is shown, else the option */
+void port_gfx_set_present_sharp(int on);
+static int pixels_preview = -1;
+EMSCRIPTEN_KEEPALIVE int port_display_sharp(void) { /* also read by the retrowser glue (canvas size) */
+    return pixels_preview >= 0 ? pixels_preview : opt_value[PORT_OPT_PIXELS];
+}
+static void display_apply(void) { port_gfx_set_present_sharp(port_display_sharp()); }
+/* the Options menu (src/main_menu/A0E190.c, #ifdef PORT): -1 ends the preview */
+void port_display_preview(int sharp) {
+    pixels_preview = sharp == 0 || sharp == 1 ? sharp : -1;
+    display_apply();
+}
 
 /* the host (rtw_option, harness --option): the start-up value or a change from outside the game */
 EMSCRIPTEN_KEEPALIVE int port_option_set(int id, int value) {
@@ -39,6 +56,7 @@ EMSCRIPTEN_KEEPALIVE int port_option_set(int id, int value) {
     }
     opt_value[id] = value;
     port_log("[option] %d = %d (host)\n", id, value);
+    if (id == PORT_OPT_PIXELS) display_apply();
     return 0;
 }
 
@@ -52,6 +70,7 @@ void port_option_set_by_game(int id, int value) {
     if (!option_valid(id, value) || opt_value[id] == value) return;
     opt_value[id] = value;
     port_log("[option] %d = %d (game menu)\n", id, value);
+    if (id == PORT_OPT_PIXELS) display_apply();
     port_option_changed(id, value);
 }
 
@@ -169,9 +188,9 @@ void *port_menu_font12(void) {
 
 /* image memory for the menu's text sprites (bitmaps + RGBA16 pixels), kept for the session: slot -> buffer */
 void *port_menu_alloc(int slot, int bytes) {
-    static void *buf[8];
-    static int size[8];
-    if (slot < 0 || slot >= 8 || bytes <= 0) return NULL;
+    static void *buf[16];
+    static int size[16];
+    if (slot < 0 || slot >= 16 || bytes <= 0) return NULL;
     if (size[slot] < bytes) {
         free(buf[slot]);
         buf[slot] = malloc((size_t)bytes); /* 8-byte aligned: enough for RGBA16 rows and Bitmap words */

@@ -1517,6 +1517,42 @@ int rdp_target_width(void) { return cur_target ? cur_target->width : 320; }
 int rdp_target_height(void) { return cur_target ? cur_target->height : 240; }
 
 /* ------------------------------------------------------------------ display (VI) */
+/* Port option 2 "Pixels: Smooth / Sharp" (session F2, docs/port/FEATURES.md): how the shown colour image is scaled
+ * onto the canvas. Display only: the colour images the game draws and reads back stay at their native size.
+ *   Smooth (0, default): one GL_LINEAR blit to the 4:3 fit (as before F2).
+ *   Sharp (1): "sharp bilinear". An integer nearest-neighbour upscale by n = ceil(fit scale) into an intermediate
+ *   image, then one GL_LINEAR blit down to the 4:3 fit: every N64 pixel becomes a square of the same size and only
+ *   its edges are blended, over at most one canvas pixel. When the fit scale is a whole number (n = the fit) it is
+ *   a single nearest blit. Integer scaling with a letterbox would waste up to a quarter of a phone's width (390 css
+ *   px at dpr 3 = 1170 device px: 3x = 960); plain nearest at 3.66x makes columns 3 and 4 pixels wide at random. */
+static int present_sharp;
+static GLuint sharp_fbo, sharp_rb;
+static int sharp_w, sharp_h;
+void port_gfx_set_present_sharp(int on) { present_sharp = !!on; }
+static void present_sharp_blit(GLuint src_fbo, int sw, int sh, int dx, int dy, int dw, int dh) {
+    int n = (int)ceilf(fmaxf((float)dw / sw, (float)dh / sh) - 0.001f);
+    if (n < 1) n = 1;
+    if (n * sw == dw && n * sh == dh) {   /* a whole-number fit: nearest straight onto the canvas */
+        glBlitFramebuffer(0, 0, sw, sh, dx, dy + dh, dx + dw, dy, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+        return;
+    }
+    if (n * sw != sharp_w || n * sh != sharp_h) {
+        if (!sharp_fbo) { glGenFramebuffers(1, &sharp_fbo); glGenRenderbuffers(1, &sharp_rb); }
+        sharp_w = n * sw; sharp_h = n * sh;
+        glBindRenderbuffer(GL_RENDERBUFFER, sharp_rb);
+        glRenderbufferStorage(GL_RENDERBUFFER, GL_RGBA8, sharp_w, sharp_h);
+        glBindRenderbuffer(GL_RENDERBUFFER, 0);
+        glBindFramebuffer(GL_DRAW_FRAMEBUFFER, sharp_fbo);
+        glFramebufferRenderbuffer(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, sharp_rb);
+    }
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, sharp_fbo);
+    glBlitFramebuffer(0, 0, sw, sh, 0, 0, sharp_w, sharp_h, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, sharp_fbo);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+    glBlitFramebuffer(0, 0, sharp_w, sharp_h, dx, dy + dh, dx + dw, dy, GL_COLOR_BUFFER_BIT, GL_LINEAR);
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, src_fbo);
+}
+
 static void vi_frame(const void *fb, int width);
 void port_gfx_vi_frame(const void *fb, int width) {
     vi_frame(fb, width);
@@ -1551,7 +1587,8 @@ static void vi_frame(const void *fb, int width) {
     int dw = (int)(k * 4), dh = (int)(k * 3), dx = (cw - dw) / 2, dy = (ch - dh) / 2;
     glBindFramebuffer(GL_READ_FRAMEBUFFER, t->fbo);
     /* N64 row 0 is GL row 0 in the target: flip onto the canvas */
-    glBlitFramebuffer(0, 0, t->width, sh, dx, dy + dh, dx + dw, dy, GL_COLOR_BUFFER_BIT, GL_LINEAR);
+    if (present_sharp) present_sharp_blit(t->fbo, t->width, sh, dx, dy, dw, dh);
+    else glBlitFramebuffer(0, 0, t->width, sh, dx, dy + dh, dx + dw, dy, GL_COLOR_BUFFER_BIT, GL_LINEAR);
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
     port_gfx_stats.presents++;
     state_dirty = 1;

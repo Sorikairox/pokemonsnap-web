@@ -27,6 +27,7 @@ void port_gfx_vi_frame(const void *fb, int width);
 void port_gfx_inval_dcache(const void *p, uint32_t len);
 void port_gfx_writeback_dcache(const void *p, uint32_t len);
 int port_gfx_init(void);
+void port_gfx_set_present_sharp(int on);   /* option 2 (F2): nearest-neighbour present ("sharp bilinear"); display only */
 
 /* tools / tests */
 void port_gfx_run_dl(const void *dl, int ucode_l3dex2);  /* interpret one list (no SP/DP events) */
