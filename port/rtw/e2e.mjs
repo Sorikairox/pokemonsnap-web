@@ -17,11 +17,14 @@
 //         offline  every server stopped, the network off: reload, boot from the caches and the remembered ROM.
 //         beach  (F2, not in the default list) phone portrait 390x844 at dpr 3, the SAVE continued to the Beach with
 //                Pixels Smooth and then Sharp (the host's stored option): screenshots to compare by eye.
-//         motion  (F3 + F4, not in the default list; a host with Motion aim and Full-screen landscape, e.g.
-//                RTW_REPO=~/Code/retrowser-wt-motion) phone landscape 844x390: both toggles from the host's menu, the SAVE
-//                continued to the Beach's camera control, device motion turns the camera right (the module's
-//                "[motion] rotation stopped" line, pictures) and nothing with Motion aim off, the same sign in
-//                landscape 90 and 270; one tap on the corner zone takes one picture, also with a finger on the stick.
+//         motion  (F3 + F4, not in the default list; a host with ☰ -> Motion "Off / Motion aim / Knock to shoot" and
+//                Full-screen landscape, e.g. RTW_REPO=~/Code/retrowser-wt-motion; before offline) phone landscape
+//                844x390: Full-screen landscape and the Motion choice from the host's menu, the SAVE continued to the
+//                Beach's camera control; Motion aim: a simulated phone (rates + gravity, so the host's calibration
+//                locks) turns the camera by the turn's angle (+-5 %, the module's "[motion] rotation stopped" line,
+//                pictures) at 90 and 270, nothing when Off; Knock to shoot: a corner knock takes exactly one picture
+//                (also with a finger on the stick), another knock / Motion aim none, turning no [motion]; then a fresh
+//                page with WebKit's rotationRate labels: the calibration locks on them and the turn is still +90.
 // Screenshots and the stored save go to the out dir (game pictures: local only, never commit). Every server and
 // Chrome it starts is stopped at the end. Prints PASS / FAIL lines.
 import { createRequire } from 'node:module';
@@ -476,19 +479,24 @@ async function beach() {
   } finally { await phone.close().catch(() => {}); }
 }
 
-// F3 + F4 through the host's UI (needs a host with Motion aim and Full-screen landscape: RTW_REPO = the retrowser
-// checkout that has them; with an older host the phase fails at the toggles). Phone landscape 844x390 (dpr 3, touch,
-// the screen angle set through CDP as the host's e2e/motion.test.ts does, devicemotion events dispatched on the page,
-// DeviceMotionEvent.requestPermission stubbed the iOS way: allowed from the toggle's tap):
-//  1. ☰ -> Touch controls: Full-screen landscape on; ☰ -> Motion: Motion aim on (the permission asked from the tap);
-//  2. the SAVE continued to the Beach (A every 2 s, as the beach phase), the tutorial's "Press Z to aim" passed with Z
-//     held, until the player controls the camera;
-//  3. a known turn right (90 deg/s about the device's x for 1 s at 90 deg: about +90 degrees of yaw): the module's
-//     "[motion] rotation stopped ... yaw +N" line (pc_options.c) and a screenshot pair (a quarter turn: a new view);
-//     then Motion aim off in the menu and the same events: no [motion] line, the view does not turn (picture pair);
-//  4. one tap on the corner zone: the [snap] shutter sequence and "[snap] photo taken ..., film left N (shutter)",
-//     then the same with a finger held on the stick;
-//  5. landscape-secondary (270): the same physical turn right (now +beta) gives a positive yaw as well.
+// F3 + F4 through the host's UI (needs a host with ☰ -> Motion "Off / Motion aim / Knock to shoot" and Full-screen
+// landscape: RTW_REPO = the retrowser checkout that has them; with an older host the phase fails at the menu).
+// Phone landscape 844x390 (dpr 3, touch; the screen angle set through CDP as the host's e2e/motion.test.ts does;
+// DeviceMotionEvent.requestPermission stubbed the iOS way). The devicemotion events are a simulated phone held
+// upright: rotationRate from a device-frame rate, accelerationIncludingGravity = gravity turned by that rotation (so
+// the host's label/unit calibration can lock), acceleration 0 (knocks: a short in-plane spike, as the host's e2e).
+//  1. Full-screen landscape on (bar hidden, Shutter an ordinary extra button), ☰ -> Motion: Motion aim;
+//  2. the SAVE continued to the Beach (A every 2 s), the tutorial's "Press Z to aim" passed (Z held + A) until the
+//     cart moves;
+//  3. a roll about the screen's normal (gravity turns, the aim does not) locks the calibration ("axes: spec (locked)"
+//     in the menu); a turn right at 90 deg/s for 1 s about gravity: the module's "[motion] rotation stopped ... yaw +N"
+//     within 5 % of the turn (pictures: a quarter turn), left likewise; the same at landscape 270;
+//  4. Motion: Off -> the same turn gives no [motion] line; a corner knock with Motion aim chosen takes no picture;
+//  5. Knock to shoot: turning logs no [motion] line, a knock on another corner takes no picture, a knock on the
+//     top-right corner takes exactly one ("[snap] photo taken ..., film left N (shutter)", one below), again with a
+//     finger held on the stick;
+//  6. a fresh page with WebKit's labels (alpha/beta/gamma = rates about x/y/z; Chrome is not WebKit, so the host
+//     guesses the spec's): the roll locks "axes: webkit (locked)" and the turn right is still ~+90.
 async function motion() {
   const LAND = { width: 844, height: 390 };
   const ctx = await newCtx({ viewport: LAND, deviceScaleFactor: 3, isMobile: true, hasTouch: true });
@@ -506,10 +514,7 @@ async function motion() {
       return Promise.resolve('granted');
     };
   });
-  const page = await ctx.newPage();
-  page.on('pageerror', (e) => errors.push(e.message));
-  const L = logger(page);
-  const cdp = await ctx.newCDPSession(page);
+  let page, L, cdp;
   const orient = async (angle) => {
     await cdp.send('Emulation.setDeviceMetricsOverride', {
       width: LAND.width, height: LAND.height, deviceScaleFactor: 3, mobile: true,
@@ -518,20 +523,80 @@ async function motion() {
     await page.waitForFunction((a) => screen.orientation.angle === a && matchMedia('(orientation: landscape)').matches, angle);
     await sleep(300);
   };
+  const angleNow = () => page.evaluate(() => screen.orientation.angle);
   const openMenu = async () => {
     await page.click((await page.$('[data-action=fsl-menu]')) ? '[data-action=fsl-menu]' : '[data-action=menu]');
     await page.waitForSelector('[data-state=menu]');
   };
   const closeMenu = async () => { if (await page.$('[data-action=close-menu]')) await page.click('[data-action=close-menu]', { timeout: 5000 }).catch(() => {}); await sleep(300); };
-  const motionAttr = () => page.getAttribute('[data-state=playing]', 'data-motion');
-  // devicemotion as a gyroscope sends it (deg/s about the device's x = beta, y = gamma, z = alpha)
-  const rotate = (r, ms) => page.evaluate(async ({ r, ms }) => {
-    const end = performance.now() + ms;
-    while (performance.now() < end) {
-      dispatchEvent(new DeviceMotionEvent('devicemotion', { rotationRate: { alpha: r.alpha ?? 0, beta: r.beta ?? 0, gamma: r.gamma ?? 0 }, interval: 16 }));
-      await new Promise((ok) => setTimeout(ok, 16));
+  const attr = (a) => page.getAttribute('[data-state=playing]', a);
+  const choose = async (mode) => {   // ☰ -> Motion: off | aim | knock
+    await openMenu();
+    const el = await page.$(`[data-field=motion-${mode}]`);
+    if (el && !(await el.isChecked())) await el.click();
+    await sleep(400);
+    const ok = el ? await el.isChecked() : false;
+    const diag = (await page.$('[data-field=motion-diag]')) ? await page.textContent('[data-field=motion-diag]') : '';
+    await closeMenu();
+    return { ok, diag, found: !!el };
+  };
+  const diagNow = async () => { await openMenu(); const d = (await page.$('[data-field=motion-diag]')) ? await page.textContent('[data-field=motion-diag]') : ''; await closeMenu(); return d; };
+  // The simulated phone: `steps` of a constant device-frame rate w (deg/s about x, y, z) for ms each, at the screen
+  // angle (gravity along the screen's up: device +x at 90, -x at 270), labels 'spec' (alpha/beta/gamma = z/x/y) or
+  // 'webkit' (x/y/z). Returns the seconds the host integrates (time stamps' span + the first sample's interval).
+  const phone = (steps, angle, labels = 'spec') => page.evaluate(async ({ steps, angle, labels }) => {
+    const up = angle === 90 ? [1, 0, 0] : [-1, 0, 0];
+    let g = up.map((v) => v * 9.81);
+    const rot = (v, w, dt) => {   // v turned by the rotation -w dt (gravity seen from a turning device), Rodrigues
+      const r = w.map((x) => -x * Math.PI / 180 * dt), th = Math.hypot(...r);
+      if (th < 1e-12) return v;
+      const k = r.map((x) => x / th), c = Math.cos(th), s = Math.sin(th);
+      const kv = [k[1] * v[2] - k[2] * v[1], k[2] * v[0] - k[0] * v[2], k[0] * v[1] - k[1] * v[0]];
+      const kd = (k[0] * v[0] + k[1] * v[1] + k[2] * v[2]) * (1 - c);
+      return [0, 1, 2].map((i) => v[i] * c + kv[i] * s + k[i] * kd);
+    };
+    let first = -1, last = -1, prev = -1;
+    for (const { w, ms } of steps) {
+      const end = performance.now() + ms;
+      while (performance.now() < end) {
+        const now = performance.now();
+        if (prev >= 0) g = rot(g, w, (now - prev) / 1000);
+        prev = now;
+        const rr = labels === 'spec' ? { alpha: w[2], beta: w[0], gamma: w[1] } : { alpha: w[0], beta: w[1], gamma: w[2] };
+        const e = new DeviceMotionEvent('devicemotion', {
+          rotationRate: rr, acceleration: { x: 0, y: 0, z: 0 },
+          accelerationIncludingGravity: { x: g[0], y: g[1], z: g[2] }, interval: 16,
+        });
+        if (first < 0) first = e.timeStamp;
+        last = e.timeStamp;
+        dispatchEvent(e);
+        await new Promise((ok) => setTimeout(ok, 16));
+      }
     }
-  }, { r, ms });
+    return (last - first) / 1000 + 0.016;
+  }, { steps, angle, labels });
+  // a turn about gravity (yaw > 0: right) at 90 deg/s
+  const yawRate = (angle, dps) => [angle === 90 ? -dps : dps, 0, 0];   // w = -dps * up
+  const roll = (angle, labels) => phone([{ w: [0, 0, 60], ms: 600 }, { w: [0, 0, -60], ms: 1200 }, { w: [0, 0, 60], ms: 600 }], angle, labels);
+  // a knock (the host's e2e/motion.test.ts): still, one 10 m/s² sample along `dir` in the screen's frame (down-left =
+  // the top-right corner knocked), a spring-back, still
+  const knock = (angle, dir = [-1, -1]) => page.evaluate(async ({ angle, dir }) => {
+    const [right, up] = angle === 90 ? [[0, -1, 0], [1, 0, 0]] : [[0, 1, 0], [-1, 0, 0]];
+    const l = Math.hypot(dir[0], dir[1]);
+    const ev = (k) => {
+      const a = [0, 1, 2].map((i) => (dir[0] * right[i] + dir[1] * up[i]) / l * k);
+      dispatchEvent(new DeviceMotionEvent('devicemotion', {
+        acceleration: { x: a[0], y: a[1], z: a[2] },
+        accelerationIncludingGravity: { x: a[0] + 9.81 * up[0], y: a[1] + 9.81 * up[1], z: a[2] + 9.81 * up[2] },
+        rotationRate: { alpha: 0, beta: 0, gamma: 0 }, interval: 16,
+      }));
+    };
+    const tick = () => new Promise((ok) => setTimeout(ok, 16));
+    for (let i = 0; i < 15; i++) { ev(0); await tick(); }
+    ev(10); await tick();
+    ev(-3); await tick();
+    for (let i = 0; i < 10; i++) { ev(0); await tick(); }
+  }, { angle, dir });
   const box = async (sel) => page.locator(sel).first().boundingBox().catch(() => null);
   let touchId = 20;
   const touchPts = new Map();
@@ -541,148 +606,217 @@ async function motion() {
     const p = touchPts.get(id); touchPts.delete(id);
     await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: touchPts.size ? [{ x: p[0], y: p[1], id, radiusX: 2, radiusY: 2, force: 1 }] : [] });
   };
-  // one turn: the "[motion] rotation stopped" line that follows it (the yaw in degrees), null if the camera did not move
-  const turn = async (r, ms) => {
+  const short = (line) => (line ?? '').replace(/^.*\[motion\] /, '').replace(/ \(before the game's pitch limits\).*$/, '');
+  // one turn about gravity for 1 s: the "[motion] rotation stopped" line that follows it, the yaw it should be
+  const turnOnce = async (angle, dps, labels = 'spec', ms = 1000) => {
     await L.reset();
-    await rotate(r, ms);
+    const secs = await phone([{ w: yawRate(angle, dps), ms }], angle, labels);
+    const want = dps * secs;
     const line = await L.wait(/\[motion\] rotation stopped/, 6);
     const m = line && line.match(/yaw ([+-][\d.]+), pitch ([+-][\d.]+)/);
-    return m ? { yaw: +m[1], pitch: +m[2], line } : { yaw: null, line: line ?? 'no "[motion] rotation stopped" line' };
+    const yaw = m ? +m[1] : null;
+    return { yaw, want, ok: yaw != null && Math.sign(yaw) === Math.sign(want) && Math.abs(yaw - want) <= 0.05 * Math.abs(want),
+      line: line ?? 'no "[motion] rotation stopped" line', detail: `${short(line) || 'no [motion] line'} (wanted ${want >= 0 ? '+' : ''}${want.toFixed(1)})` };
   };
-  try {
+  // the game takes the camera away now and then (a message, a Pokemon's scene: "... degrees dropped outside camera
+  // control"): then wait, A, and the same turn again
+  const turn = async (angle, dps, labels = 'spec') => {
+    let r = null;
+    for (let i = 0; i < 6 && !(r && r.yaw != null); i++) {
+      if (i) {
+        const drop = (await L.text()).match(/\[motion\] camera control ended.*?([\d.]+) degrees dropped/);
+        console.log(`  motion: no camera turn (${drop ? drop[1] + ' degrees dropped outside camera control' : r.line}); A, then again`);
+        await press(page, 'KeyX'); await sleep(2500);
+      }
+      r = await turnOnce(angle, dps, labels);
+      if (i) r.detail += ` (try ${i + 1})`;
+    }
+    return r;
+  };
+  // boot (a fresh page), the save, the Beach until the cart moves
+  const toBeach = async (tag) => {
+    page = await ctx.newPage();
+    page.on('pageerror', (e) => errors.push(e.message));
+    L = logger(page);
+    cdp = await ctx.newCDPSession(page);
     await orient(90);
     await openGame(page, { remember: false });
     await page.waitForSelector('[data-state=playing]', { timeout: 180000 });
     await L.wait(/rtw: game started/, 90);
-    // 1. the host's toggles
-    await openMenu();
-    const fsl = await page.$('[data-field=fs-landscape]');
-    if (fsl) await fsl.check();
-    const mt = await page.$('[data-field=motion]');
-    if (mt && !(await mt.isChecked())) await mt.click();
-    await sleep(500);
-    const asks = await page.evaluate(() => window.__asks);
-    const motionChecked = mt ? await mt.isChecked() : false;
-    await closeMenu();
-    const corner = await page.waitForSelector('.play.fsl.has-corner .corner-zone', { timeout: 5000 }).catch(() => null);
-    check('motion: Full-screen landscape on from the menu: no bar, the corner zone "Shutter" at the top right', fsl && corner &&
-      !(await page.isVisible('.play .bar')) && /Shutter/.test(await corner.textContent()),
-      fsl ? (corner ? `zone ${JSON.stringify(await corner.boundingBox())}` : 'no .corner-zone') : 'no [data-field=fs-landscape] (host without the layout?)');
-    check('motion: Motion aim on from the menu (permission asked from the tap, granted)', mt && motionChecked && asks >= 1 && await motionAttr() === 'on',
-      mt ? `checked ${motionChecked}, asks ${asks}, data-motion ${await motionAttr()}` : 'no [data-field=motion] (host without Motion aim?)');
-    await shot(page, 'motion-fsl', true);
-    // 2. the save, then the Beach
+  };
+  const beachRoute = async (tag) => {
     await openMenu();
     await L.reset();
     await page.setInputFiles('[data-field=import-save]', SAVE);
     const st = await L.wait(/rtw: game started.*save from the host/, 90);
     await closeMenu();
-    check('motion: the save imported (fresh game from the save)', !!st, st ?? '');
+    check(`motion ${tag}: the save imported`, !!st, st ?? '');
     const t0 = Date.now();
     while (Date.now() - t0 < 75000) { await press(page, 'KeyX'); await sleep(2000); }
-    await shot(page, 'motion-beach', true);
-    // the tutorial stops the cart at "Press Z to aim" (the picture still, motion dropped by design): Z held, A, Z let
-    // go, A, until the picture moves again (the cart going on)
+    // the tutorial stops the cart at "Press Z to aim" (the picture still, motion dropped by design) until 3 photos: Z
+    // held, A, Z let go, A, until the picture moves again
     let moving = 0;
     for (let i = 0; i < 10; i++) {
-      const a = await shot(page, `motion-wait-${i}a`);
+      const a = await shot(page, `${tag}-wait-${i}a`);
       await sleep(1000);
-      const b = await shot(page, `motion-wait-${i}b`);
+      const b = await shot(page, `${tag}-wait-${i}b`);
       moving = pixelDiff(a, b);
       if (moving > 0.05) break;
-      console.log(`  motion: the picture is still (${(moving * 100).toFixed(1)} % changed): Z held + A`);
+      console.log(`  motion ${tag}: the picture is still (${(moving * 100).toFixed(1)} % changed): Z held + A`);
       await page.keyboard.down('KeyZ'); await sleep(2000);
       await press(page, 'KeyX'); await sleep(1500);
       await page.keyboard.up('KeyZ'); await sleep(2000);
       await press(page, 'KeyX'); await sleep(2500);
     }
-    check('motion: the Beach, the cart moving (camera control)', moving > 0.05, `${(moving * 100).toFixed(0)} % of pixels changed in 1 s`);
-    check('motion: no permission banner over the game after the restart', !(await page.$('[data-state=motion-ask]')) && await motionAttr() === 'on',
-      `data-motion ${await motionAttr()}`);
-    // 3. a turn right while the player controls the camera (tried again while a message or a cut-scene holds it)
+    check(`motion ${tag}: the Beach, the cart moving (camera control)`, moving > 0.05, `${(moving * 100).toFixed(0)} % of pixels changed in 1 s`);
+  };
+  const photoAfter = async (secs) => { const p = await L.wait(/\[snap\] photo taken/, secs); return p; };
+  const lastFilm = async () => { const f = [...(await L.allText()).matchAll(/\[snap\] photo taken.*film left (\d+)/g)]; return f.length ? +f[f.length - 1][1] : 60; };
+  try {
+    await toBeach('spec');
+    // 1. the host's menu: Full-screen landscape, Motion aim
+    await openMenu();
+    const fsl = await page.$('[data-field=fs-landscape]');
+    if (fsl) await fsl.check();
+    await closeMenu();
+    const aim = await choose('aim');
+    const asks = await page.evaluate(() => window.__asks);
+    const fslOn = !!(await page.$('.play.fsl'));
+    const x17 = await box('[data-touch=x17]');
+    check('motion: Full-screen landscape on from the menu: no bar, no corner zone, Shutter an ordinary extra button on screen',
+      fsl && fslOn && !(await page.isVisible('.play .bar')) && !(await page.$('.corner-zone')) && x17 && x17.x >= 0 && x17.y >= 0 &&
+      x17.x + x17.width <= LAND.width && x17.y + x17.height <= LAND.height && /Shutter/.test(await page.locator('[data-touch=x17]').first().textContent()),
+      fsl ? `fsl ${fslOn}; Shutter ${x17 ? `${Math.round(x17.x)},${Math.round(x17.y)} ${Math.round(x17.width)}x${Math.round(x17.height)}` : 'missing'}` : 'no [data-field=fs-landscape]');
+    check('motion: ☰ -> Motion: Motion aim chosen (permission asked from the tap, granted)', aim.ok && asks >= 1 && await attr('data-motion') === 'on',
+      aim.found ? `asks ${asks}, data-motion ${await attr('data-motion')}, diag "${aim.diag}"` : 'no [data-field=motion-aim] (host without the Motion choice?)');
+    await shot(page, 'motion-fsl', true);
+    // 2. the Beach
+    await beachRoute('spec');
+    check('motion: no permission banner over the game after the restart', !(await page.$('[data-state=motion-ask]')) && await attr('data-motion') === 'on',
+      `data-motion ${await attr('data-motion')}`);
+    // 3. calibration, then the turns
+    await L.reset();
+    await roll(90, 'spec');
+    await sleep(1000);
+    const d1 = await diagNow();
+    check('motion: a roll (gravity turning) locks the calibration on the spec\'s labels, and does not turn the camera',
+      /axes: spec \(locked\)/.test(d1) && !/\[motion\]/.test(await L.text()), `diag "${d1}"; ${(await L.text()).match(/\[motion\].*/)?.[0] ?? 'no [motion] line'}`);
     let right = null, before = null, after = null;
-    for (let i = 0; i < 8 && !(right && right.yaw != null); i++) {
+    for (let i = 0; i < 6 && !(right && right.yaw != null); i++) {
       if (i) { console.log(`  motion: no camera turn yet (${right.line}); A, then again`); await press(page, 'KeyX'); await sleep(2500); }
       before = await shot(page, `motion-right-${i}-before`);
-      right = await turn({ beta: -90 }, 1000);
+      right = await turnOnce(90, 90);
       after = await shot(page, `motion-right-${i}-after`);
     }
-    const dOn = before && after ? pixelDiff(before, after) : 0;
-    check('motion (90): a turn right of the phone turns the game right (about +90 degrees of yaw)', right.yaw != null && right.yaw > 50 && right.yaw < 130,
-      `${right.line.replace(/^.*\[motion\] /, '')}; picture change ${(dOn * 100).toFixed(0)} % of pixels`);
-    // and back left: the opposite sign
-    const left = await turn({ beta: 90 }, 1000);
-    check('motion (90): the same turn to the left gives a negative yaw', left.yaw != null && left.yaw < -50, left.line.replace(/^.*\[motion\] /, ''));
-    // 5. landscape-secondary: the device's top is on the right, the same physical turn right is +beta
-    // (no screenshot between the turns: a Playwright screenshot puts its own emulated orientation back, 90)
-    const angleNow = () => page.evaluate(() => screen.orientation.angle);
+    const dOn = pixelDiff(before, after);
+    check('motion (90): a turn right of the phone (90 deg/s, 1 s) turns the game right by the same angle (+-5 %)', right.ok,
+      `${right.detail}; picture change ${(dOn * 100).toFixed(0)} % of pixels`);
+    const left = await turn(90, -90);
+    check('motion (90): the same turn to the left: the same angle, negative', left.ok, left.detail);
+    // landscape-secondary (no screenshot between the turns: a Playwright screenshot puts its own emulated
+    // orientation, 90, back over the CDP override)
     await orient(270);
     const a0 = await angleNow();
-    const r270 = await turn({ beta: 90 }, 500);
-    const l270 = await turn({ beta: -90 }, 500);
+    const r270 = await turn(270, 90);
+    const l270 = await turn(270, -90);
     const a1 = await angleNow();
     await shot(page, 'motion-270', true);
-    const a2 = await angleNow();
-    check('motion (270): the same physical turn right gives the same yaw sign (+), left (-)', a0 === 270 && a1 === 270 && r270.yaw > 20 && l270.yaw < -20,
-      `screen angle ${a0} -> ${a1} (after a screenshot: ${a2}); right: ${r270.line.replace(/^.*\[motion\] /, '')}; left: ${l270.line.replace(/^.*\[motion\] /, '')}`);
+    check('motion (270): the same physical turns, 1 s each: right +, left -, same angle (+-5 %)', a0 === 270 && a1 === 270 && r270.ok && l270.ok,
+      `screen angle ${a0} -> ${a1}; right: ${r270.detail}; left: ${l270.detail}`);
     await orient(90);
-    // 3b. Motion aim off: the same events change nothing
-    await openMenu();
-    const mt2 = await page.$('[data-field=motion]');
-    if (mt2 && await mt2.isChecked()) await mt2.click();
-    await closeMenu();
+    // 4. a corner knock with Motion aim chosen: no picture
+    await L.reset();
+    await knock(90);
+    const pAim = await photoAfter(3);
+    check('motion: a corner knock with Motion aim chosen takes no picture', !pAim && !/\[snap\] idle -> enter/.test(await L.text()), pAim ?? 'no photo');
+    // Motion: Off -> the same turn changes nothing
+    const off = await choose('off');
     await L.reset();
     const offA = await shot(page, 'motion-off-before');
-    await rotate({ beta: -90 }, 1000);
+    await phone([{ w: yawRate(90, 90), ms: 1000 }], 90);
     await sleep(1000);
     const offB = await shot(page, 'motion-off-after');
-    const tOff = await L.text();
     const dOff = pixelDiff(offA, offB);
-    check('motion off: the same turn changes nothing (no rtw_motion reaches the game, the view keeps its direction)',
-      await motionAttr() === 'off' && !/\[motion\]/.test(tOff) && dOff < dOn,
-      `data-motion ${await motionAttr()}; ${(tOff.match(/\[motion\].*/) || ['no [motion] line'])[0]}; picture change ${(dOff * 100).toFixed(0)} % (on: ${(dOn * 100).toFixed(0)} %)`);
-    // 4. the Shutter: one tap on the corner zone = one picture
-    const shutter = async (tag, withStick) => {
-      const zone = await box('.corner-zone');
-      if (!zone) return check(`shutter ${tag}: corner zone`, false, 'no .corner-zone');
+    const tOff = await L.text();
+    check('motion off: the same turn changes nothing (no rtw_motion, the view keeps its direction)',
+      off.ok && await attr('data-motion') === 'off' && !/\[motion\]/.test(tOff) && dOff < dOn,
+      `data-motion ${await attr('data-motion')}; ${tOff.match(/\[motion\].*/)?.[0] ?? 'no [motion] line'}; picture change ${(dOff * 100).toFixed(0)} % (on: ${(dOn * 100).toFixed(0)} %)`);
+    // 5. Knock to shoot
+    const kn = await choose('knock');
+    check('knock: ☰ -> Motion: Knock to shoot chosen (medium), the host listens for knocks, no motion aim',
+      kn.ok && await attr('data-knock') === 'on' && await attr('data-motion') === 'off', `data-knock ${await attr('data-knock')}, data-motion ${await attr('data-motion')}; diag "${kn.diag}"`);
+    await L.reset();
+    await phone([{ w: yawRate(90, 90), ms: 1000 }], 90);
+    await sleep(1500);
+    const tK = await L.text();
+    check('knock: turning the phone in this mode logs no [motion] line', !/\[motion\]/.test(tK), tK.match(/\[motion\].*/)?.[0] ?? 'no [motion] line');
+    await L.reset();
+    await knock(90, [1, 1]);   // the bottom-left corner: pushed up-right
+    const pElse = await photoAfter(3);
+    const dElse = await diagNow();
+    check('knock: a knock on another corner takes no picture', !pElse && !/\[snap\] idle -> enter/.test(await L.text()), `${pElse ?? 'no photo'}; diag "${dElse}"`);
+    const knockShot = async (tag, withStick) => {
       let stickId = null;
       if (withStick) {
-        const st2 = await box('[data-touch=stick]');
-        if (st2) { stickId = await touchStart(st2.x + st2.width / 2, st2.y + 2); await sleep(300); }   // the stick's top edge: up
+        const st = await box('[data-touch=stick]');
+        if (st) { stickId = await touchStart(st.x + st.width / 2, st.y + 2); await sleep(300); }   // the stick's top edge: up
       }
-      const films = [...(await L.allText()).matchAll(/\[snap\] photo taken.*film left (\d+)/g)];
-      const filmBefore = films.length ? +films[films.length - 1][1] : 60;
+      const filmBefore = await lastFilm();
       let photo = null, ignored = '';
-      // a tutorial message holds the camera now and then ("tap ignored ... (no camera control)"): wait and tap again
+      // a tutorial message holds the camera now and then ("tap ignored ... (no camera control)"): wait and knock again
       for (let i = 0; i < 6 && !photo; i++) {
-        if (i) { ignored = (await L.text()).match(/\[snap\] shutter tap ignored.*/)?.[0] ?? ''; console.log(`  shutter ${tag}: ${ignored || 'no photo'}; again in 3 s`); await sleep(3000); }
+        if (i) { ignored = (await L.text()).match(/\[snap\] shutter tap ignored.*/)?.[0] ?? ''; console.log(`  knock ${tag}: ${ignored || 'no photo'}; again in 3 s`); await sleep(3000); }
         await L.reset();
-        const id = await touchStart(zone.x + zone.width * 0.7, zone.y + zone.height * 0.3);
-        await sleep(120);
-        await touchEnd(id);
-        photo = await L.wait(/\[snap\] photo taken/, 6);
+        await knock(90);
+        photo = await photoAfter(6);
       }
       await sleep(300);
-      await shot(page, `shutter-${tag}`, true);
+      await shot(page, `knock-${tag}`, true);
       await L.wait(/\[snap\] leave -> idle|\[snap\] shoot -> idle/, 5);
+      await sleep(1500);   // nothing more: exactly one picture
       if (stickId != null) await touchEnd(stickId);
       const t = await L.text();
+      const photos = (t.match(/\[snap\] photo taken/g) || []).length;
       const seq = [...t.matchAll(/\[snap\] (\w+) -> (\w+) at retrace \d+.*?shutter\)/g)].map((m) => m[2]).join(' ');
-      check(`shutter ${tag}: one tap on the corner = one picture (the [snap] sequence, the film counter)`,
-        photo && /\(shutter\)/.test(photo) && /enter aim shoot/.test(seq) && !/tap ignored/.test(t) && (!withStick || stickId != null) &&
+      check(`knock ${tag}: a knock on the top-right corner takes exactly one picture (the [snap] shutter sequence, film - 1)`,
+        photo && /\(shutter\)/.test(photo) && photos === 1 && /enter aim shoot/.test(seq) && (!withStick || stickId != null) &&
         +(photo.match(/film left (\d+)/)?.[1]) === filmBefore - 1,
-        `${seq || 'no shutter sequence'}; ${photo ? photo.replace(/^.*\[snap\] /, '') : 'no photo'} (before: ${filmBefore})` +
-        (withStick ? `; stick ${stickId != null ? 'held' : 'not found'}${/stick 0,80/.test(t) ? ' (pad0 stick 0,80)' : ''}` : '') +
-        (ignored ? `; earlier tap: ${ignored.replace(/^.*\[snap\] /, '')}` : ''));
-      return photo;
+        `${seq || 'no shutter sequence'}; ${photo ? photo.replace(/^.*\[snap\] /, '') : 'no photo'} (before: ${filmBefore}); ${photos} photo line(s)` +
+        (withStick ? `; stick ${stickId != null ? 'held' : 'not found'}` : '') + (ignored ? `; earlier: ${ignored.replace(/^.*\[snap\] /, '')}` : ''));
     };
-    await shutter('tap', false);
+    await knockShot('corner', false);
     await sleep(2500);
-    await shutter('tap-stick-held', true);
-    await sleep(2000);
-    await shot(page, 'shutter-after', true);
+    await knockShot('corner-stick-held', true);
+    const d3 = await diagNow();
+    check('knock: the host\'s diagnostic counts the corner knocks', +(d3.match(/(\d+) taken/)?.[1] ?? 0) >= 2, `diag "${d3}"`);
+    await shot(page, 'knock-after', true);
     writeFileSync(join(outDir, 'log-motion.txt'), await L.allText());
-  } finally { L.stop(); await ctx.close(); }
+    L.stop(); await page.close();
+    // 6. WebKit's labels, a fresh page (a new MotionAim, not locked yet: Chrome is not WebKit, so the spec's guess)
+    await toBeach('webkit');
+    const aim2 = await choose('aim');
+    check('motion webkit: Motion aim chosen again (the stored choice was Knock to shoot)', aim2.ok && /spec \(guess\)/.test(aim2.diag), `diag "${aim2.diag}"`);
+    await beachRoute('webkit');
+    await L.reset();
+    await roll(90, 'webkit');
+    await sleep(1000);
+    const d2 = await diagNow();
+    // (until the lock the host reads these events the spec's way, so the roll moves the camera a little then: only
+    // the lock is asserted, the line shows what the guess did)
+    const rollLine = (await L.text()).match(/\[motion\] rotation stopped.*/)?.[0];
+    check('motion webkit: a roll locks the calibration on WebKit\'s labels', /axes: webkit \(locked\)/.test(d2),
+      `diag "${d2}"; before the lock: ${rollLine ? short(rollLine) : 'no [motion] line'}`);
+    let rw = null;
+    for (let i = 0; i < 6 && !(rw && rw.yaw != null); i++) {
+      if (i) { console.log(`  motion webkit: no camera turn yet (${rw.line}); A, then again`); await press(page, 'KeyX'); await sleep(2500); }
+      const b = await shot(page, `webkit-right-${i}-before`);
+      rw = await turnOnce(90, 90, 'webkit');
+      const a = await shot(page, `webkit-right-${i}-after`);
+      rw.detail += `; picture change ${(pixelDiff(b, a) * 100).toFixed(0)} %`;
+    }
+    check('motion webkit (90): the turn right with WebKit\'s labels turns the game right by the same angle (+-5 %)', rw.ok, rw.detail);
+    writeFileSync(join(outDir, 'log-motion-webkit.txt'), await L.allText());
+  } finally { L?.stop(); await ctx.close(); }
 }
 // share of pixels whose colour changed by more than 48 (sum of |dR|+|dG|+|dB|) between two same-size screenshots
 function pixelDiff(fa, fb) {

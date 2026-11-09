@@ -141,16 +141,25 @@ host's N64 layout around the picture, the touch A reaches pad 0; wrong (one byte
 module refuses; offline (network off, host and mock stopped): reload boots from the caches and the remembered ROM,
 no request reaches the mock.
 
-motion (F3 + F4, opt-in: `RTW_REPO=~/Code/retrowser-wt-motion PHASES=...,motion`, a host with Motion aim and
-Full-screen landscape; place it before `offline`, which stops the servers): phone landscape 844x390, dpr 3, touch, the
-screen angle set through CDP and DeviceMotionEvent.requestPermission stubbed the iOS way (first grant only from a
-tap). Full-screen landscape and Motion aim turned on in the host's menu; the SAVE continued to the Beach (A every 2 s
-for 75 s, then Z held + A until the cart moves: the tutorial stops it at "Press Z to aim" until 3 photos);
-devicemotion 90 deg/s about the device's x for 1 s -> `[motion] rotation stopped ... yaw +90.3` (left -90.9) and a
-quarter turn in the picture; landscape-secondary (270) the same physical turns +45 / -45; Motion aim off -> the same
-events give no `[motion]` line and no turn; one tap on the corner zone -> `[snap] idle -> enter -> aim -> shoot ->
-leave -> idle (shutter)` and `[snap] photo taken ..., film left N (shutter)` one below the previous photo, again with a
-finger held on the stick. Test note: a Playwright screenshot puts its own emulated screen orientation (90) back over
-the CDP override, so no screenshot is taken between turns at 270.
+motion (F3 + F4, opt-in: `RTW_REPO=~/Code/retrowser-wt-motion PHASES=...,motion`, a host with ☰ -> Motion "Off /
+Motion aim / Knock to shoot" and Full-screen landscape; place it before `offline`, which stops the servers): phone
+landscape 844x390, dpr 3, touch, the screen angle set through CDP, DeviceMotionEvent.requestPermission stubbed the iOS
+way (first grant only from a tap). The devicemotion events are a simulated upright phone: rotationRate from a
+device-frame rate and accelerationIncludingGravity = gravity turned by that rotation, so the host's label/unit
+calibration can lock (a roll about the screen's normal: gravity turns, the aim does not). Full-screen landscape (no
+bar, no corner zone, Shutter an ordinary extra button) and Motion aim chosen in the host's menu; the SAVE continued to
+the Beach (A every 2 s for 75 s, then Z held + A until the cart moves: the tutorial stops it at "Press Z to aim" until
+3 photos). Motion aim: the roll locks "axes: spec (locked)"; a turn about gravity at 90 deg/s for 1 s ->
+`[motion] rotation stopped ... yaw +90.4` within 5 % of rate x time, left the same negative, likewise at landscape 270
+(a quarter turn in the pictures); Off -> no `[motion]` line; a corner knock with Motion aim chosen takes no picture.
+Knock to shoot: turning logs no `[motion]` line, a knock on another corner takes none ("other direction" in the
+diagnostic), a knock on the top-right corner (the host's synthetic one) takes exactly one: `[snap] idle -> enter ->
+aim -> shoot -> leave -> idle (shutter)` and `[snap] photo taken ..., film left N (shutter)` one below the previous,
+again with a finger held on the stick. Then a fresh page with WebKit's rotationRate labels (alpha/beta/gamma = rates
+about x/y/z): Chrome is not WebKit, so the host guesses the spec's labels (the roll turns the camera a few degrees
+before the lock), the roll locks "axes: webkit (locked)" and the turn right is again +90 within 5 %. Test notes: a
+Playwright screenshot puts its own emulated orientation (90) back over the CDP override, so none is taken between the
+turns at 270; a turn the game drops (a message or a Pokemon's scene: "... degrees dropped outside camera control") is
+tried again.
 
 Checklist items not covered: a real phone (WebKit worker, real dpr), a gamepad, export of the save into an emulator.
