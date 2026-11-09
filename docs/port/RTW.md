@@ -44,6 +44,8 @@ Needs `./pokemonsnap.z64` (`port/docker/run.sh rom PATH`) and the local retrowse
 | `save` | `flash`, 131072 | the cartridge's FlashRAM, console byte order (SAVE.md) |
 | `license`, `source` | `MIT`, github.com/Sorikairox/pokemonsnap-web | public repo |
 | `controls.extra` | bit 16 "Snap" | F1: the Snap button (FEATURES.md) |
+| | bit 17 "Shutter", `place: "corner"` | F4: one tap = one picture; a trigger zone in the host's full-screen landscape layout |
+| `controls.motion` | `true` | F3: the module takes `rtw_motion` (motion aim) |
 | `options` | id 1 "Snap button", bool, default 1, `inGame` | F1: shown in the game's Options menu, kept by the host |
 | | id 2 "Sharp pixels", bool, default 0, `inGame` | F2: the Options menu's "Pixels Smooth / Sharp" row, kept by the host |
 | no `net`, `picture`, `icon` | | nothing needs them yet |
@@ -90,6 +92,15 @@ Shared-code hooks (weak defaults keep the harness as it was): `port_vbe_fix_defe
   and the game never starts the motor (`contRumbleStart` has no caller; only `scPreNMIDefault` sends init + stop).
 - **Options** (F1, F2): export `rtw_option(id, value)` -> `port_option_set` (pc_options.c); import
   `rtw_option_changed` called when the game's Options menu changes one (1 Snap button, 2 Pixels). `rtw_input` passes bit 16 (Snap) to `port_set_pad`.
+- **Motion** (F3): export `rtw_motion(port, yaw, pitch)` (port 0; 1/1024 degree, host-corrected for orientation)
+  -> `port_motion_add`; logged once (`rtw: motion aim: first rotation from the host`). **Shutter** (F4): `rtw_input`
+  keeps bits 0-17; a bit-17 press seen by any `rtw_input` reaches the next retrace.
+- **New manifest keys and the check tool** (TODO, F3/F4): `controls.motion` and `controls.extra[].place` are new in
+  the host's interface. A check tool / host whose schema does not have them rejects the manifest
+  (`additionalProperties: false`), so `build.sh` leaves them out of the shipped `retrowser.json` while
+  `RTW_MJS` does not know them (it prints `rtw: TODO: ...`); the source manifest keeps them. With them left out the
+  host offers no Motion aim and draws Shutter as an ordinary extra button. `rtw_motion` is reported as an unknown
+  export (a warning) by such a tool.
 - **Imports**: `rtw_log`, `rtw_build_id`, `rtw_rumble`, `rtw_option_changed`. Not used yet: `rtw_export_file` (album photos as PNG would
   be a feature behind an option).
 - Test hooks: `Module.rtwManual` (no pacing; `node_host.mjs` steps `_port_rtw_retrace` itself), `port_rtw_test_log`.

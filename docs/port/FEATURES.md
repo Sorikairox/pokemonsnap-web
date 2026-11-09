@@ -10,6 +10,9 @@ options are **not** part of the save: the FlashRAM image stays exactly what the 
 | 1 | Snap button | bool | 1 (on) | the game's Options menu, row "Snap Button  On / Off" | the host (`inGame`: `rtw_option` at start, `rtw_option_changed` from the menu); harness `--option 1=V` |
 | 2 | Pixels (manifest label "Sharp pixels") | bool | 0 (Smooth) | the game's Options menu, row "Pixels  Smooth / Sharp" (previewed while choosing) | the host, like option 1; harness `--option 2=1` |
 
+No port option for motion aim (F3) or the Shutter (F4): the host's "Motion aim" toggle is the switch for the first,
+the host's (opt-in) full-screen landscape layout decides where the second is drawn; see below.
+
 Code: `port/ultra/pc_options.c` (`port_option_set` / `port_option_get` / `port_option_set_by_game`, weak
 `port_option_changed`; F2: `port_display_sharp`, `port_display_preview`), `port/rtw/rtw.c` (`rtw_option`, `rtw_option_changed`), `port/rtw/retrowser.json` (`options`,
 `controls.extra`). Harness: `node port/web/run.mjs ... --option 1=0`, node `port-test ... --option 1=0`.
@@ -32,6 +35,44 @@ Taking a picture needs Z (hold to zoom) + stick + A at once.
   `app_level/player.c` reports, every game frame, that the player controls the camera (`port_snap_course`, #ifdef
   PORT, in `handleAnalogStick`, `updateCameraZoomedIn` and the tutorial's "Press Z" wait); in menus, the pause menu
   and the camera check the bit is dropped, so it never presses A there. `[snap]` log lines show each step.
+
+## Shutter: one tap, one picture (session F4, docs/port/notes/F3.md)
+
+`controls.extra` bit 17 "Shutter" with `place: "corner"`: the host draws it as a trigger zone in the top-right corner
+of its full-screen landscape layout (tapped with the right index finger like a camera's shutter), elsewhere as an
+ordinary extra button. A **tap** (the press; its length does not matter) while the player controls the camera is a
+whole picture through F1's `port_pad_filter`: not zoomed -> zoom in (Z held, or one Z press with "Z Button Setup:
+Switch") -> wait until `updateCameraZoomedIn` reports that A takes a picture now (`port_snap_shoot_ready`, #ifdef
+PORT: no zoomed-in C-button turn, the game's minimum time between photos over) for 3 game frames, so the frame the
+Pokémon detector analysed is a zoomed-in one -> A once -> zoom back out. Already zoomed in: only the A press. A tap
+during a sequence, while zooming, while Snap is held, or outside camera control is **ignored** (a `[snap] shutter tap
+ignored` line), never queued: a queued tap would take a picture at a moment the player did not choose. Not tied to
+option 1 (that is the Snap button's switch). In the retrowser module a bit-17 press seen by any `rtw_input` reaches
+the next retrace even if released before it. A tap takes ~25 retraces (0.4 s): zoom 11, ready 2-3, A + hold 11, zoom
+out. Harness: `--input F:0x20000:3`.
+
+## Motion aim (session F3, docs/port/notes/F3.md)
+
+Manifest `controls.motion: true`; export `rtw_motion(port, yaw, pitch)`: the device's rotation since the previous
+call in 1/1024 degree, corrected for the screen's orientation by the host (yaw > 0 turned right, pitch > 0 tilted
+up), sent only while the player has turned "Motion aim" on in the host's menu (default off). `pc_options.c`
+`port_motion_add` sums it; `app_level/player.c` takes it every game frame in `handleAnalogStick` (#ifdef PORT,
+`port_motionAim`) and turns the view **1:1** (10 degrees of phone = 10 degrees of view), combined with the stick:
+- yaw -> `PlayerViewYaw`. Zoomed out it is relative to the facing; past +-0.3 pi the facing turns a quarter
+  (`gDirectionIndex`, `CurrentDirectionYaw`) exactly as the game does for the stick, but without the game's snap to
+  -+0.2 pi, so no rotation is lost (turning the phone 90 degrees = one C-button turn). Zoomed in: relative to the
+  cart, kept in [0, 2 pi). There is no yaw limit in the game (zoomed out the facing changes, zoomed in it wraps).
+- pitch -> `ViewPitch`, kept within the game's `MinPitch`..`MaxPitch` (-22.5 / +45 degrees by default,
+  `setPitchLimits`); past a limit the view stays at it (tilting back moves it at once, like a mouse look).
+- "Control Stick Setup" (inverted Y) is a stick preference and is **not** applied: tilting the phone up always looks
+  up.
+- Held while zooming in or out and during a zoomed-in C-button turn (applied when it ends); dropped while input is
+  disabled (tutorial messages, cut-scenes), paused, in menus and during a zoomed-out C-button turn (handleAnalogStick
+  does not run: the motion of those frames is lost, the view keeps its game-driven turn). Sums held at +-90 degrees.
+- `[motion]` log lines: when motion starts turning the camera, every 600 game frames and when camera control ends
+  (degrees applied, degrees dropped).
+Harness: `run.mjs` / node `port-test` `--motion F:YAW:PITCH[:LEN],...` (per retrace, before the pad, as the host).
+The local test page (port/web/index.html) is a scripted harness without live input: no DeviceMotionEvent there.
 
 ## Sharp pixels (session F2, docs/port/notes/F2.md)
 
