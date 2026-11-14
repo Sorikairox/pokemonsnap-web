@@ -21,12 +21,16 @@ s8 D_800E8374_A0F904;
 s8 D_800E8375_A0F905;
 SObj* D_800E8378_A0F908[5];
 #ifdef PORT
-/* port (F1, F2, F5, F6): rows 5 "Snap Button" (option 1), 6 "Pixels" (option 2), 7 "Motion Aim" (option 3) and 8
- * "Mouse Aim" (option 4) (A0D4D0.c port_OptionsCreateRows), shown between rows 3 and 4. The labels need 8 entries; the console's array keeps its size
+/* port (F1, F2, F5, F6, F7): rows 5 "Snap Button" (option 1), 6 "Pixels" (option 2), 7 "Motion Aim" (option 3), 8
+ * "Mouse Aim" (option 4) and 9 "Mouse Speed" (option 5, an int 1..10: portEditSpeed) (A0D4D0.c
+ * port_OptionsCreateRows), shown between rows 3 and 4. The labels need 8 entries; the console's array keeps its size
  * (the port lays this .bss out at the console's addresses, a 6th entry would be D_800E838C_A0F91C), so this file uses
  * port_OptLabels instead. */
-#define PORT_OPT_ROWS 4
+#define PORT_OPT_ROWS 5
 #define PORT_ROW_FIRST 5
+#define PORT_ROW_SPEED (PORT_ROW_FIRST + 4) /* F7: Mouse Speed, the last port row */
+#define PORT_OPT_MOUSE_SPEED 5
+#define PORT_SPEED_MAX 10
 #define PORT_ROW_PORT(row) ((row) >= PORT_ROW_FIRST && (row) < PORT_ROW_FIRST + PORT_OPT_ROWS)
 #define PORT_OPT_PIXELS 2
 #define PORT_OPT_MOTION_AIM 3
@@ -35,15 +39,23 @@ SObj* port_OptLabels[5 + PORT_OPT_ROWS];
 #define D_800E8378_A0F908 port_OptLabels
 extern GObj* port_OptValues[PORT_OPT_ROWS];
 extern GObj* port_OptHelp[PORT_OPT_ROWS];
+extern Bitmap* port_SpeedBitmaps[PORT_SPEED_MAX];
 s32 port_option_get(s32 id);
 void port_option_set_by_game(s32 id, s32 value);
 void port_display_preview(s32 sharp);
-/* per row: the option, and whether the left value (choice 0) means option value 1 (On) or 0 (Pixels: Smooth) */
-static const s8 port_OptId[PORT_OPT_ROWS] = { 1, PORT_OPT_PIXELS, PORT_OPT_MOTION_AIM, PORT_OPT_MOUSE_AIM };
-static const s8 port_OptLeftIsOne[PORT_OPT_ROWS] = { 1, 0, 1, 1 };
-s8 port_OptChoice[PORT_OPT_ROWS]; /* 0 left, 1 right (as D_800E8394_A0F924 for Sound) */
+/* per two-value row: the option, and whether the left value (choice 0) means option value 1 (On) or 0 (Pixels:
+ * Smooth) */
+static const s8 port_OptId[PORT_OPT_ROWS - 1] = { 1, PORT_OPT_PIXELS, PORT_OPT_MOTION_AIM, PORT_OPT_MOUSE_AIM };
+static const s8 port_OptLeftIsOne[PORT_OPT_ROWS - 1] = { 1, 0, 1, 1 };
+s8 port_OptChoice[PORT_OPT_ROWS - 1]; /* 0 left, 1 right (as D_800E8394_A0F924 for Sound) */
+s8 port_SpeedValue;                   /* F7: Mouse Speed as the menu has it, 1..10 (committed by Return) */
 /* the rows from the top: 0 1 2 3, the port's rows, 4 (Return) */
-static const s8 port_RowOrder[5 + PORT_OPT_ROWS] = { 0, 1, 2, 3, 5, 6, 7, 8, 4 };
+static const s8 port_RowOrder[5 + PORT_OPT_ROWS] = { 0, 1, 2, 3, 5, 6, 7, 8, 9, 4 };
+
+/* F7: "< N >" shows N: the value sprite takes that number's picture (A0D4D0.c port_SpeedBitmaps) */
+static void portSpeedShow(s32 n) {
+    port_OptValues[PORT_ROW_SPEED - PORT_ROW_FIRST]->data.sobj->sprite.bitmap = port_SpeedBitmaps[n - 1];
+}
 
 static s8 portRowStep(s8 row, s32 step) {
     s32 i;
@@ -263,7 +275,13 @@ void OptionsMenu_InitValues(void) { /* was func_800E71DC_A0E76C */
         func_800E6C14_A0E1A4(D_800E835C_A0F8EC->data.sobj->next, 0xFF, 0x82, 0x41);
     }
 #ifdef PORT
-    for (i = 0; i < PORT_OPT_ROWS; i++) {
+    port_SpeedValue = port_option_get(PORT_OPT_MOUSE_SPEED);
+    if (port_SpeedValue < 1 || port_SpeedValue > PORT_SPEED_MAX) {
+        port_SpeedValue = 5;
+    }
+    portSpeedShow(port_SpeedValue);
+    func_800E6C14_A0E1A4(port_OptValues[PORT_ROW_SPEED - PORT_ROW_FIRST]->data.sobj, 0xFF, 0x82, 0x41);
+    for (i = 0; i < PORT_OPT_ROWS - 1; i++) {
         port_OptChoice[i] = port_option_get(port_OptId[i]) != port_OptLeftIsOne[i];
         func_800E6C14_A0E1A4(port_OptValues[i]->data.sobj, 0xFF, 0x82, 0x41);
         func_800E6C00_A0E190(port_OptValues[i]->data.sobj->next, 0xFF);
@@ -401,7 +419,8 @@ s8 OptionsMenu_ChooseRow(void) { /* was func_800E7700_A0EC90 */
         } else {
             if (temp_v0_2->pressedButtons & STICK_SLOW_UP) {
                 auPlaySoundWithParams(0x41, 0x7FFF, 0x40, 1.0f, 0);
-#ifdef PORT /* rows from the top: 0 1 2 3 5 (Snap Button) 6 (Pixels) 7 (Motion Aim) 8 (Mouse Aim) 4 (Return) */
+#ifdef PORT /* rows from the top: 0 1 2 3 5 (Snap Button) 6 (Pixels) 7 (Motion Aim) 8 (Mouse Aim) 9 (Mouse Speed)
+             * 4 (Return) */
                 D_800E8374_A0F904 = portRowStep(D_800E8374_A0F904, -1);
 #else
                 D_800E8374_A0F904--;
@@ -462,6 +481,7 @@ void OptionsMenu_BlinkValue(GObj* arg0) { /* was func_800E7950_A0EEE0 */
         case PORT_ROW_FIRST + 1:
         case PORT_ROW_FIRST + 2:
         case PORT_ROW_FIRST + 3:
+        case PORT_ROW_SPEED: /* one value (D_800E8375_A0F905 stays 0) */
             sobj = port_OptValues[D_800E8374_A0F904 - PORT_ROW_FIRST]->data.sobj;
             break;
 #endif
@@ -532,6 +552,7 @@ void OptionsMenu_ShowValueHelp(GObj* arg0) { /* was func_800E7B24_A0F0B4 */
         case PORT_ROW_FIRST + 1:
         case PORT_ROW_FIRST + 2:
         case PORT_ROW_FIRST + 3:
+        case PORT_ROW_SPEED: /* one value help (D_800E8375_A0F905 stays 0) */
             var_v0 = port_OptHelp[D_800E8374_A0F904 - PORT_ROW_FIRST]->data.sobj;
             break;
 #endif
@@ -549,6 +570,58 @@ void OptionsMenu_ShowValueHelp(GObj* arg0) { /* was func_800E7B24_A0F0B4 */
     }
 }
 
+#ifdef PORT
+/* F7: editing Mouse Speed, as OptionsMenu_EditRow edits a two-value row: the value blinks (OptionsMenu_BlinkValue)
+ * and its help shows (OptionsMenu_ShowValueHelp); left / right on the stick (as every row) or the D-pad change it by
+ * one within 1..10 with the rows' sound, shown at once; A keeps it, B restores it (Return commits it, like the other
+ * rows). The value is used by the mouse in a course only (the menus never hold the mouse): nothing else to preview. */
+static void portEditSpeed(void) {
+    GObj* gobj;
+    SObj* sobj = port_OptValues[PORT_ROW_SPEED - PORT_ROW_FIRST]->data.sobj;
+    UnkStruct800BEDF8* in;
+    s8 setting = port_SpeedValue;
+
+    D_800E8375_A0F905 = 0;
+    gobj = omAddGObj(0xE, NULL, 0, 0x80000000);
+    omCreateProcess(gobj, OptionsMenu_BlinkValue, 0, 1);
+    omCreateProcess(gobj, OptionsMenu_ShowValueHelp, 0, 1);
+    ohWait(1);
+
+    while (true) {
+        in = func_800AA38C(0);
+        if (gContInputPressedButtons & A_BUTTON) {
+            auPlaySoundWithParams(0x42, 0x7FFF, 0x40, 1.0f, 0);
+            break;
+        } else if (gContInputPressedButtons & B_BUTTON) {
+            auPlaySoundWithParams(0x43, 0x7FFF, 0x40, 1.0f, 0);
+            port_SpeedValue = setting;
+            portSpeedShow(port_SpeedValue);
+            break;
+        }
+        if (in->pressedButtons & (STICK_SLOW_LEFT | L_JPAD)) {
+            auPlaySoundWithParams(0x41, 0x7FFF, 0x40, 1.0f, 0);
+            if (port_SpeedValue > 1) {
+                port_SpeedValue--;
+            }
+            portSpeedShow(port_SpeedValue);
+        } else if (in->pressedButtons & (STICK_SLOW_RIGHT | R_JPAD)) {
+            auPlaySoundWithParams(0x41, 0x7FFF, 0x40, 1.0f, 0);
+            if (port_SpeedValue < PORT_SPEED_MAX) {
+                port_SpeedValue++;
+            }
+            portSpeedShow(port_SpeedValue);
+        }
+        ohWait(1);
+    }
+
+    port_OptHelp[PORT_ROW_SPEED - PORT_ROW_FIRST]->data.sobj->sprite.attr |= SP_HIDDEN;
+    omDeleteGObj(gobj);
+    ohWait(1);
+    func_800E6C14_A0E1A4(sobj, 0xFF, 0x82, 0x41);
+    ohWait(1);
+}
+#endif
+
 void OptionsMenu_EditRow(void) { /* was func_800E7C40_A0F1D0 */
     u8 setting;
     u8 settingInv;
@@ -557,6 +630,12 @@ void OptionsMenu_EditRow(void) { /* was func_800E7C40_A0F1D0 */
     SObj* sp44[2];
     UnkStruct800BEDF8* temp_v0_2;
 
+#ifdef PORT
+    if (D_800E8374_A0F904 == PORT_ROW_SPEED) {
+        portEditSpeed();
+        return;
+    }
+#endif
     switch (D_800E8374_A0F904) {
         case 1:
             sobj = D_800E8358_A0F8E8->data.sobj;
@@ -689,6 +768,7 @@ void OptionsMenu_Run(void) { /* was func_800E7F98_A0F528 */
             case PORT_ROW_FIRST + 1:
             case PORT_ROW_FIRST + 2:
             case PORT_ROW_FIRST + 3:
+            case PORT_ROW_SPEED:
 #endif
                 OptionsMenu_EditRow();
                 break;
@@ -699,9 +779,10 @@ void OptionsMenu_Run(void) { /* was func_800E7F98_A0F528 */
                 setPlayerFlag(PFID_INVERTED_Y, D_800E8396_A0F926);
 #ifdef PORT
                 /* not player flags: the host keeps them (rtw_option_changed), the save stays the console's */
-                for (i = 0; i < PORT_OPT_ROWS; i++) {
+                for (i = 0; i < PORT_OPT_ROWS - 1; i++) {
                     port_option_set_by_game(port_OptId[i], port_OptChoice[i] ^ port_OptLeftIsOne[i]);
                 }
+                port_option_set_by_game(PORT_OPT_MOUSE_SPEED, port_SpeedValue);
                 port_display_preview(-1);
 #endif
                 cond = true;

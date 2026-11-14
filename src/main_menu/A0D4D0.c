@@ -48,30 +48,38 @@ extern Sprite D_80342FF0_main_menu_vpk0;
 extern Sprite D_803434D0_main_menu_vpk0;
 
 #ifdef PORT
-/* port (F1 + F2 + F5 + F6; docs/port/notes/F1.md, F2.md, F5.md, F6.md): the rows "Snap Button", "Pixels", "Motion
- * Aim" and "Mouse Aim" of the Options menu (port options 1-4, port/ultra/pc_options.c; not in the save). The logic is
- * in A0E190.c (row indices 5-8). The menu's own rows, values and descriptions are pictures (IA16, white, the letters in the alpha,
+/* port (F1 + F2 + F5 + F6 + F7; docs/port/notes/F1.md, F2.md, F5.md, F6.md, F7.md): the rows "Snap Button", "Pixels",
+ * "Motion Aim", "Mouse Aim" and "Mouse Speed" of the Options menu (port options 1-5, port/ultra/pc_options.c; not in
+ * the save). The logic is in A0E190.c (row indices 5-9). The menu's own rows, values and descriptions are pictures (IA16, white, the letters in the alpha,
  * SP_TEXSHUF) in this scene's vpk0 data, drawn in a font of their own (no font of that look exists in the game). F5:
  * the port's rows are composed when the menu opens from the letters of those pictures, already decompressed in memory
  * from the player's ROM: each letter is cut out of a native picture (portGlyphs: which picture, column, width; no
  * pixel is in the source), "O" is the native "C" with its left half mirrored, "x" (no native one) is drawn here. Words
  * are kerned like the native text (letters 3 pixels apart on each row, a space is 4 more); the bullet and the "< >"
  * brackets are copied from "Screen" and "< Mono >". The new pictures are IA16 like the native ones and get the same
- * attributes and colours, so they blink, highlight and blend exactly as the native rows do. */
+ * attributes and colours, so they blink, highlight and blend exactly as the native rows do. F7: the menu pictures have
+ * no digits; "0".."9" are the course's film counter's (white, square like this face, a "1" that reads as one; 8 rows
+ * on the capitals' baseline), cut from the player's ROM by port_menu_digits (pc_options.c) as coverage, so they take
+ * the rows' white / orange like the letters. */
 #define PORT_OPT_SNAP_BUTTON 1
 #define PORT_OPT_PIXELS 2  /* F2: "Pixels: Smooth / Sharp" (display only) */
 #define PORT_OPT_MOTION_AIM 3 /* F5: "Motion Aim: On / Off" (the host reads the gyroscope while it is on) */
 #define PORT_OPT_MOUSE_AIM 4  /* F6: "Mouse Aim: On / Off" (the module asks for the mouse in camera control) */
-#define PORT_OPT_ROWS 4    /* rows 5, 6, 7, 8 */
-/* F6: nine rows (the four native ones, the port's, Return) no longer fit 16 pixels apart above the description box:
- * they are 15 apart from y 65 (the native first row is at 73, 19 pixels below the title's line at 54; now 11), so
- * Return stays at y 185 and the box where F5 put it (moved down 32: y 198-231 of 240) */
-#define PORT_ROW_Y(k) (65 + 15 * (k)) /* screen row k: 0-3 native, 4.. the port's, 4 + PORT_OPT_ROWS Return */
+#define PORT_OPT_MOUSE_SPEED 5 /* F7: "Mouse Speed: < N >", 1..10 (how far the view turns for a pixel of mouse motion) */
+#define PORT_SPEED_MAX 10
+#define PORT_OPT_ROWS 5    /* rows 5, 6, 7, 8, 9 */
+/* F6: nine rows (the four native ones, the port's, Return) no longer fit 16 pixels apart above the description box.
+ * F7: ten rows are 14 pixels apart from y 59 (the native first row is at 73, 19 pixels below the title's line at 54;
+ * now 5, the letters' top 6 below it), so Return stays at y 185 and the box where F5 put it (moved down 32: y 198-231
+ * of 240) */
+#define PORT_ROW_Y(k) (59 + 14 * (k)) /* screen row k: 0-3 native, 4.. the port's, 4 + PORT_OPT_ROWS Return */
 #define PORT_OPT_BOX_DY 32
 void* port_menu_alloc(s32 slot, s32 bytes);
+void* port_menu_digits(void);
 s32 port_option_get(s32 id);
-GObj* port_OptValues[PORT_OPT_ROWS]; /* "< On >", "< Off >" (as D_800E8358_A0F8E8 for Sound) */
+GObj* port_OptValues[PORT_OPT_ROWS]; /* "< On >", "< Off >" (as D_800E8358_A0F8E8 for Sound); Mouse Speed: "< N >" */
 GObj* port_OptHelp[PORT_OPT_ROWS];   /* what each value does, shown while choosing (as D_800E834C_A0F8DC) */
+Bitmap* port_SpeedBitmaps[PORT_SPEED_MAX]; /* F7: the pictures "< 1 >" .. "< 10 >" (A0E190.c swaps them on the sprite) */
 
 /* the alpha (coverage) of pixel (x, y) of a native IA16 menu picture: its bitmaps lie side by side in bands of
  * bmheight rows; SP_TEXSHUF pictures have the two 32-bit words of every 64-bit word of their odd rows swapped (as
@@ -172,6 +180,34 @@ static s32 portGlyph(char ch, u8 out[PORT_GLYPH_H][8]) {
             }
         }
         return 4;
+    }
+    if (ch >= '0' && ch <= '9') { /* F7: a digit (port_menu_digits: 12 x 8 coverage, on the capitals' baseline), its
+                                   * empty columns trimmed */
+        u8* d = port_menu_digits();
+        s32 c0 = 8, c1 = -1;
+
+        if (d == NULL) {
+            return 0;
+        }
+        d += (ch - '0') * 12 * 8;
+        for (r = 0; r < PORT_GLYPH_H; r++) {
+            for (k = 0; k < 8; k++) {
+                if (d[r * 8 + k] != 0) {
+                    c0 = k < c0 ? k : c0;
+                    c1 = k > c1 ? k : c1;
+                }
+            }
+        }
+        if (c1 < c0) {
+            return 0;
+        }
+        w = c1 - c0 + 1;
+        for (r = 0; r < PORT_GLYPH_H; r++) {
+            for (k = 0; k < w; k++) {
+                out[r][k] = d[r * 8 + c0 + k];
+            }
+        }
+        return w;
     }
     for (i = 0; i < ARRAY_COUNT(portGlyphs); i++) {
         g = &portGlyphs[i];
@@ -352,6 +388,20 @@ static void portValueSprite(Sprite* spr, s32 slot, char* word) {
     portTextDraw(img, 64, PORT_GLYPH_H, word, 28 - portTextWidth(word) / 2, 0);
 }
 
+/* F7: Mouse Speed's value, one picture over both value columns (x 163-277: the left "<" where "< Stereo >" has it,
+ * the right ">" where "< Mono >" has it) with the number centred between them */
+static void portSpeedSprite(Sprite* spr, s32 slot, s32 n) {
+    u16* img = portSprite(spr, slot, 128, PORT_GLYPH_H);
+    char num[3];
+
+    num[0] = n >= 10 ? '0' + n / 10 : '0' + n;
+    num[1] = n >= 10 ? '0' + n % 10 : 0;
+    num[2] = 0;
+    portNativeCopy(img, 128, PORT_GLYPH_H, &D_80342150_main_menu_vpk0, 0, 10, 10, 0, 0);
+    portNativeCopy(img, 128, PORT_GLYPH_H, &D_80342150_main_menu_vpk0, 45, 11, 10, 104, 0);
+    portTextDraw(img, 128, PORT_GLYPH_H, num, 57 - portTextWidth(num) / 2, 0);
+}
+
 /* a description: 238 x 30 like the native ones (their lines start at column 8, rows 3 and 15) */
 static void portHelpSprite(Sprite* spr, s32 slot, char* text) {
     u16* img = portSprite(spr, slot, 256, 30);
@@ -362,7 +412,8 @@ static void portHelpSprite(Sprite* spr, s32 slot, char* text) {
 void func_800E643C_A0D9CC(SObj* sobj, s8 arg1);
 
 /* the port's rows, in screen order below "Control Stick Setup" (row index 5 + i in A0E190.c). Only letters of
- * portGlyphs (and O, x) can be written: the native pictures have no E F G I J K L Q T U V W X Y q z, no digits. */
+ * portGlyphs (and O, x) and the digits (F7) can be written: the native pictures have no E F G I J K L Q T U V W X Y
+ * q z. Mouse Speed (an int, F7) has no two values: its number is drawn by portSpeedSprite, one value help. */
 typedef struct {
     s32 option;      /* port option id (pc_options.c) */
     s32 leftIsOne;   /* the left value means option value 1 (On / Off) or 0 (Pixels: Smooth / Sharp) */
@@ -384,6 +435,8 @@ static PortOptRowText portOptRows[PORT_OPT_ROWS] = {
     { PORT_OPT_MOUSE_AIM, true, "Mouse Aim", { "On", "Off" }, "Mouse Aim setting.",
       { "Aim with the mouse. Click to take a\npicture, hold the right button to focus.",
         "Mouse is not used. Aim with the\nControl Stick." } },
+    { PORT_OPT_MOUSE_SPEED, false, "Mouse Speed", { NULL, NULL }, "Mouse Speed setting.",
+      { "How fast the mouse turns the view.\n1 slow, 10 fast. Mouse Aim must be On.", NULL } },
 };
 
 static void portMoveY(GObj* gobj, s32 dy) {
@@ -394,9 +447,9 @@ static void portMoveY(GObj* gobj, s32 dy) {
     }
 }
 
-/* F1 + F2 + F5 + F6: rows 5 ("Snap Button"), 6 ("Pixels"), 7 ("Motion Aim") and 8 ("Mouse Aim") between "Control
- * Stick Setup" and "Return"; every row 15 pixels apart from y 65 (PORT_ROW_Y), "Return" at y 185 and the description
- * box 32 pixels down (it then spans y 198-231 of 240, 13 pixels below "Return" as in F2) */
+/* F1 + F2 + F5 + F6 + F7: rows 5 ("Snap Button"), 6 ("Pixels"), 7 ("Motion Aim"), 8 ("Mouse Aim") and 9 ("Mouse
+ * Speed") between "Control Stick Setup" and "Return"; every row 14 pixels apart from y 59 (PORT_ROW_Y), "Return" at
+ * y 185 and the description box 32 pixels down (it then spans y 198-231 of 240, 13 pixels below "Return" as in F2) */
 static void portRowsSpread(void) {
     SObj* sobj;
     GObj* values[3];
@@ -453,6 +506,34 @@ void port_OptionsCreateRows(void) {
         sobj = omGObjAddSprite(D_800E8338_A0F8C8, &D_8033ED70_main_menu_vpk0); /* the row's ":" */
         SET_SPRITE_POS(sobj->sprite, 158, y + 2);
         sobj->sprite.attr = SP_TEXSHUF | SP_TRANSPARENT;
+
+        if (row->option == PORT_OPT_MOUSE_SPEED) { /* F7: one value, "< N >", over both value columns */
+            for (k = 0; k < PORT_SPEED_MAX; k++) {
+                portSpeedSprite(&spr, 30 + k, k + 1);
+                port_SpeedBitmaps[k] = spr.bitmap;
+            }
+            if (value < 1 || value > PORT_SPEED_MAX) {
+                value = 5;
+            }
+            spr.bitmap = port_SpeedBitmaps[value - 1];
+            port_OptValues[i] = ohCreateSprite(0xE, ohUpdateDefault, 0, 0x80000000, renDrawSprite, 1, 0x80000000, -1,
+                                               &spr, 0, NULL, 1);
+            sobj = port_OptValues[i]->data.sobj;
+            SET_SPRITE_POS(sobj->sprite, 163, y);
+            func_800E643C_A0D9CC(sobj, false); /* the current value: orange */
+
+            portHelpSprite(&spr, 6 * i + 3, row->help);
+            sobj = omGObjAddSprite(D_800E8344_A0F8D4, &spr);
+            SET_SPRITE_POS(sobj->sprite, 41, 168 + PORT_OPT_BOX_DY);
+            sobj->sprite.attr |= SP_HIDDEN;
+            portHelpSprite(&spr, 6 * i + 4, row->valueHelp[0]);
+            port_OptHelp[i] = ohCreateSprite(0xE, ohUpdateDefault, 0, 0x80000000, renDrawSprite, 1, 0x80000000, -1,
+                                             &spr, 0, NULL, 1);
+            sobj = port_OptHelp[i]->data.sobj;
+            SET_SPRITE_POS(sobj->sprite, 41, 168 + PORT_OPT_BOX_DY);
+            sobj->sprite.attr |= SP_HIDDEN;
+            continue;
+        }
 
         /* choice 0 = the left value, as the Sound row's Stereo / Mono; highlighted: the current one */
         portValueSprite(&spr, 6 * i + 1, row->values[0]);
