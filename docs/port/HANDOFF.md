@@ -7,6 +7,23 @@ default branch `web`; retrowser build on the orphan branch `rtw-dist`; MIT licen
 orchestrator pushes, only to `pub`; never to `origin` (ethteck). Rebuild `rtw-dist` with `port/rtw/build.sh` (check
 `--rom` OK) after port changes. Older entries saying "private" / "never push" describe the state at their time.
 
+## F7 — 2026-11-14: Mouse Speed (option 5), a number in the Options menu
+
+Notes: **docs/port/notes/F7.md**. `web` commits 8430588 (module), 843849c (Options row), f7eb7c6 (e2e), and the docs
+commit. No retrowser change: the host already takes int options with min / max (spec §4.7).
+1. Digits: the menu's pictures have none; the game's were compared (film counter, 12- and 8-pixel window fonts,
+   app_level message font). The **film counter's** (square, white, a clear "1", 8 rows on the capitals' baseline)
+   are cut from the player's ROM at run time (`port_menu_digits`: offset, stride, row shift; no pixels in git).
+2. Port option 5 "Mouse Speed", int 1..10, default 5, `inGame`: 82/1024 degree a pixel x 1.25^(N-5) (34..250; 5 =
+   F6's 0.08); zoomed in 3/4; motion aim stays 1:1.
+3. Options row "Mouse Speed  < N >" (one value over both columns), left / right (stick or D-pad) one step with the
+   rows' sound and blink, shown at once, B restores, Return commits. Not greyed when Mouse Aim is Off (help says it
+   must be On). Ten rows now 14 px apart from y 59; Return and the box unchanged.
+Verified: Beach route byte-identical to b2d4361's (7 PNGs, WAV, flash, read-back); mouse = motion pictures at speeds 5
+and 7; gfx ALL OK; port-test 5000 OK; matching build OK; build.sh check OK (.z64 + .n64), romscan 0; e2e all phases
+PASS (desk + mouse rerun with the kept save image). **rtw-dist must be rebuilt / pushed by the orchestrator**
+(port/build/rtw/dist is built from the final code). Downloads: none.
+
 ## F6 — 2026-11-14: mouse aim (option 4)
 
 Notes: **docs/port/notes/F6.md**. `web` commits 2721425 (module), 35dc87f (Options row), 9cf7496 (e2e), and the docs

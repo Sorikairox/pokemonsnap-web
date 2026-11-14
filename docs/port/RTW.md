@@ -50,6 +50,7 @@ Needs `./pokemonsnap.z64` (`port/docker/run.sh rom PATH`) and the local retrowse
 | | id 2 "Sharp pixels", bool, default 0, `inGame` | F2: the Options menu's "Pixels Smooth / Sharp" row, kept by the host |
 | | id 3 "Motion aim", bool, default 0, `inGame` | F5: the Options menu's "Motion Aim On / Off" row; the host reads the gyroscope only while it is on |
 | | id 4 "Mouse aim", bool, default 1, `inGame` | F6: the Options menu's "Mouse Aim On / Off" row; mouse aim needs no manifest key (`rtw_pointer_lock` / `rtw_mouse` are standard) |
+| | id 5 "Mouse speed", int, default 5, `min` 1, `max` 10, `inGame` | F7: the Options menu's "Mouse Speed < N >" row (the mouse look's degrees a pixel); the host (spec §4.7) ignores a value outside min..max, and so does the module |
 | no `net`, `picture`, `icon` | | nothing needs them yet |
 
 ## Build (`port_build.py --rtw`, `link_rtw`)
@@ -93,7 +94,8 @@ Shared-code hooks (weak defaults keep the harness as it was): `port_vbe_fix_defe
 - **Rumble**: `__osMotorAccess` -> `port_rumble` -> `rtw_rumble(channel, on)`. Not reached: the port reports no pak,
   and the game never starts the motor (`contRumbleStart` has no caller; only `scPreNMIDefault` sends init + stop).
 - **Options** (F1, F2): export `rtw_option(id, value)` -> `port_option_set` (pc_options.c); import
-  `rtw_option_changed` called when the game's Options menu changes one (1 Snap button, 2 Pixels, 3 Motion Aim). `rtw_input` passes bit 16 (Snap) to `port_set_pad`.
+  `rtw_option_changed` called when the game's Options menu changes one (1 Snap button, 2 Pixels, 3 Motion Aim, 4 Mouse
+  Aim, 5 Mouse Speed: an int 1..10, F7; `port_option_set` refuses other values: `[option] ignored`). `rtw_input` passes bit 16 (Snap) to `port_set_pad`.
 - **Motion** (F3): export `rtw_motion(port, yaw, pitch)` (port 0; 1/1024 degree, host-corrected for orientation)
   -> `port_motion_add`; logged once (`rtw: motion aim: first rotation from the host`). **Shutter** (F4): `rtw_input`
   keeps bits 0-17; a bit-17 press seen by any `rtw_input` reaches the next retrace.
@@ -188,5 +190,11 @@ release, a middle click's apple, the pause menu gives the mouse back (no prompt)
 (`document.exitPointerLock`: the Escape key does not release it in headless Chrome) leaves the prompt and the module
 does not call again, the click that captures again takes no picture. The `options` phase steps over the Mouse Aim row;
 `menu` visits 4 port rows.
+
+F7: `mouse` also sets Mouse Speed 5 -> 7 on its second menu visit (two presses right on the row; the row's value
+region before / after: changed and orange = the row is drawn), checks `rtw_option_changed 5 = 7`, the host's
+`rtw_option 5 = 5` after the first reload and `= 7` after the second, the module's `Mouse Speed 7: 128/1024` line,
+and the turns at that speed: 400 px = +-50 degrees, 200 px up = +25 (+-5 %; 32 / 16 at 5). `options`, `motionopt`
+and `mouse` step over the new row; `menu` visits 5 port rows (MENU_ROWS).
 
 Checklist items not covered: a real phone (WebKit worker, real dpr), a gamepad, export of the save into an emulator.

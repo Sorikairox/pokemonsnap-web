@@ -11,6 +11,7 @@ options are **not** part of the save: the FlashRAM image stays exactly what the 
 | 2 | Pixels (manifest label "Sharp pixels") | bool | 0 (Smooth) | the game's Options menu, row "Pixels  Smooth / Sharp" (previewed while choosing) | the host, like option 1; harness `--option 2=1` |
 | 3 | Motion Aim (manifest label "Motion aim") | bool | 0 (Off) | the game's Options menu, row "Motion Aim  On / Off" (F5) | the host, like option 1; harness `--option 3=1` |
 | 4 | Mouse Aim (manifest label "Mouse aim") | bool | 1 (On) | the game's Options menu, row "Mouse Aim  On / Off" (F6) | the host, like option 1; harness `--option 4=0` |
+| 5 | Mouse Speed (manifest label "Mouse speed") | int 1..10 | 5 | the game's Options menu, row "Mouse Speed  < N >" (F7) | the host, like option 1 (`min` / `max` in the manifest); harness `--option 5=7` |
 
 Option 1 also hides the Snap touch button: `controls.extra` bit 16 has `"when": 1` (the host drops it from its touch
 layout as soon as the game reports `rtw_option_changed(1, 0)`; the key and a gamepad button still reach the pad, and
@@ -20,7 +21,7 @@ Motion choice (below). No port option for the Shutter (F4).
 
 Code: `port/ultra/pc_options.c` (`port_option_set` / `port_option_get` / `port_option_set_by_game`, weak
 `port_option_changed`; F2: `port_display_sharp`, `port_display_preview`; F5: `port_motion_add` drops motion while
-option 3 is off; F6: `port_mouse_add`, `mouse_lock_update`), `port/rtw/rtw.c` (`rtw_option`, `rtw_option_changed`), `port/rtw/retrowser.json` (`options`,
+option 3 is off; F6: `port_mouse_add`, `mouse_lock_update`; F7: `mouse_units`, `port_menu_digits`), `port/rtw/rtw.c` (`rtw_option`, `rtw_option_changed`), `port/rtw/retrowser.json` (`options`,
 `controls.extra`). Harness: `node port/web/run.mjs ... --option 1=0`, node `port-test ... --option 1=0`.
 
 ## The camera on a touch screen (session F1, docs/port/notes/F1.md)
@@ -103,11 +104,13 @@ standard, deployed, no manifest key): the import `rtw_pointer_lock(on)` and the 
   menu, camera control asks again (one click). Mouse events that arrive while the module does not hold it are dropped.
 - **Look**: `rtw_mouse`'s dx / dy (CSS pixels, summed by the host over a display frame) turn the view through F3's
   motion-aim path (`port_motion_take`: yaw -> PlayerViewYaw with the facing's quarter turns, pitch -> ViewPitch within
-  MinPitch..MaxPitch, the same holds and drops), summed with the stick and the phone. **0.08 degree a pixel**
-  (82/1024): moving across the picture turns about its field of view, like a desktop game's default; zoomed in
-  (fovy 40 instead of 55) 3/4 of it, so the picture moves alike under the mouse. Mouse up looks up whatever "Control
-  Stick Setup" says (a stick preference, not applied, as for motion aim). No sensitivity setting (the native letters
-  and the screen leave no room for another row).
+  MinPitch..MaxPitch, the same holds and drops), summed with the stick and the phone. **Mouse Speed** (option 5,
+  F7, the Options row "Mouse Speed  < N >", 1..10, default 5) picks the degrees a pixel: 82/1024 x 1.25^(N - 5),
+  rounded: 34, 42, 52, 66, **82**, 102, 128, 160, 200, 250 /1024 (0.033 .. 0.244 degree; 5 = F6's 0.08 degree, at
+  which moving across the picture turns about its field of view, like a desktop game's default); each step is the
+  same ratio, so a step feels alike anywhere on the scale, and 1 .. 10 spans 7.4x. Zoomed in (fovy 40 instead of 55)
+  3/4 of it, so the picture moves alike under the mouse. Motion aim stays 1:1 (Mouse Speed is the mouse's only).
+  Mouse up looks up whatever "Control Stick Setup" says (a stick preference, not applied, as for motion aim).
 - **Buttons** (only while the module holds the mouse and the player controls the camera; elsewhere "[mouse] click
   ignored"): **left click** zoomed out = a Shutter tap (F4: zoom in, wait until the zoomed camera takes pictures, A,
   zoom out); zoomed in (Z, Switch mode, or the right button) = one A press as soon as the camera takes pictures (it
@@ -115,7 +118,8 @@ standard, deployed, no manifest key): the import `rtw_pointer_lock(on)` and the 
   held (Switch mode: one Z press in, one out), through F1's state machine without the A on release; a left click
   while it is held takes the picture. **Middle click** zoomed out = A: the game throws an apple (A's own job zoomed out).
   The pester ball stays on B.
-- **Logging**: `[mouse] pointer lock asked / mouse given back at retrace N (why)`, `[mouse] turning the camera ...`,
+- **Logging**: `[mouse] pointer lock asked at retrace N (why), Mouse Speed S: U/1024 degree a pixel` / `[mouse] mouse
+  given back at retrace N (why)`, `[mouse] turning the camera ...`,
   `[mouse] movement stopped ... yaw, pitch ...` (as `[motion]`), `[mouse] A (left click: picture | middle click:
   apple)`, `[mouse] click ignored ... (why)`; pictures log `[snap] photo taken ... (mouse click)`; the module's
   `rtw: pointer lock asked / given back`, `rtw: mouse aim: first mouse event from the host`.
@@ -150,10 +154,29 @@ ignored).
 ### The Options menu with the port's rows
 
 Rows from the top: Screen, Sound, Z Button Setup, Control Stick Setup, Snap Button (5), Pixels (6), Motion Aim (7),
-Mouse Aim (8, F6), Return (4). F6: nine rows no longer fit 16 pixels apart, so every row (native ones too: labels,
-values, ":") is 15 apart from y 65 (the native first row was at 73, 19 pixels under the title's line; now 11):
-"Return" stays at y 185 and the description box (its lines, sides and every description) 32 pixels down, y 198-231
-of 240, as F5 left it.
+Mouse Aim (8, F6), Mouse Speed (9, F7), Return (4). F6: nine rows no longer fitted 16 pixels apart (15 from y 65);
+F7: ten rows, every row (native ones too: labels, values, ":") is **14 apart from y 59** (the native first row was
+at 73, 19 pixels under the title's line at 54; now 5, the letters' top 6 under it): "Return" stays at y 185 and the
+description box (its lines, sides and every description) 32 pixels down, y 198-231 of 240, as F5 left it.
+
+**Mouse Speed `< N >` (F7)**: one value picture over both value columns (the left "<" where "< Stereo >" has it, the
+right ">" where "< Mono >" has it, x 163-277), the number centred between them; orange at rest (the current value),
+blinking white while edited, like the native rows' chosen value. One picture per number (made when the menu opens),
+swapped on the sprite as the number changes. A on the row, then left / right on the stick (as every row) or the D-pad:
+one step, the rows' sound (0x41), clamped to 1..10, shown at once; A keeps it, B restores the number the row had;
+Return (or B in the row list) commits it (`rtw_option_changed(5, N)`). Nothing else to preview: the menus never hold
+the mouse. Not greyed while Mouse Aim is Off (kept simple: the value is kept and applies when it is On; the row's
+help says "Mouse Aim must be On"). Texts: "Mouse Speed setting." / "How fast the mouse turns the view. / 1 slow, 10
+fast. Mouse Aim must be On."
+
+**Digits (F7)**: the menu's pictures have none. The game's digits were compared (notes/F7.md): the course's film
+counter (RGBA16 8x16, white, 1-bit, square, 2-pixel strokes, 8 rows), the 12-pixel window font's (scores, totals,
+dialogue: 10 rows, 1-pixel anti-aliased, round; its "1" has a flag that reads as "7" at this size), the 8-pixel
+window font's (Oak's photo check totals: 7 rows, too small) and app_level's message font (the 12-pixel face again).
+The **film counter's** sit best: square like this face, as heavy as the menu's letters look on screen, a "1" that
+reads as one, on the capitals' baseline. `port_menu_digits` (pc_options.c) cuts them out of the player's ROM (the
+offset of the first, the stride; no pixels in the source) into coverage cells; they are drawn and kerned like the
+letters and take the same white / orange.
 
 **Drawn like the native rows (F5)**: the game's rows, values and descriptions are pictures (IA16, white, the letters
 in the alpha) in the title scene's vpk0 data, in a font of their own (the window font of window/text.c is a different
@@ -163,4 +186,4 @@ from (no pixels in the source); "O" is the native "C" with its left half mirrore
 code. Letters are kerned like the native text (3 pixels between solid pixels on each row, a space 4 more), the bullet
 and the "< >" brackets are copied from "Screen" and "< Mono >", values are 56 pixels wide centred like "< Mono >",
 descriptions start at column 8 with lines 12 pixels apart like the native ones. Only the letters of the native text
-can be written: no E F G I J K L Q T U V W X Y q z, no digits (descriptions are worded around them).
+can be written: no E F G I J K L Q T U V W X Y q z (descriptions are worded around them); digits since F7 (above).
