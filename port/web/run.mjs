@@ -59,12 +59,14 @@ writeFileSync(join(out, 'log.txt'), '');
 writeFileSync(join(out, 'config.json'), JSON.stringify(cfg) + '\n');
 const log = (s) => appendFileSync(join(out, 'log.txt'), s.endsWith('\n') ? s : s + '\n');
 
+// SNAP_WEB_BUILD: another harness build directory (e.g. a baseline copy for an equivalence run; F5)
+const BUILD = resolve(process.env.SNAP_WEB_BUILD || join(ROOT, 'port/build/web'));
 const files = {
   '/': [join(ROOT, 'port/web/index.html'), 'text/html'],
   '/index.html': [join(ROOT, 'port/web/index.html'), 'text/html'],
   '/worker.js': [join(ROOT, 'port/web/worker.js'), 'text/javascript'],
-  '/pokemonsnap.js': [join(ROOT, 'port/build/web/pokemonsnap.js'), 'text/javascript'],
-  '/pokemonsnap.wasm': [join(ROOT, 'port/build/web/pokemonsnap.wasm'), 'application/wasm'],
+  '/pokemonsnap.js': [join(BUILD, 'pokemonsnap.js'), 'text/javascript'],
+  '/pokemonsnap.wasm': [join(BUILD, 'pokemonsnap.wasm'), 'application/wasm'],
   '/rom': [romPath, 'application/octet-stream'],
 };
 if (saveIn) files['/save'] = [saveIn, 'application/octet-stream'];

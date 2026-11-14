@@ -13,6 +13,14 @@
 //                the host remembers it across a reload; the Snap key (Digit1) reaches the pad;
 //                (F2) option 2 "Pixels" likewise (Smooth -> Sharp), and Sharp is visible: the canvas takes the view's
 //                size and the picture's neighbouring pixels are equal far more often than with Smooth;
+//                (F5) option 3 "Motion Aim" -> On likewise; the Snap touch button ("when": 1) goes at once when
+//                Snap Button is set Off (the host's touch layout forced on for the first visit);
+//         menu   (F5, not in the default list) the Options menu on a phone (dpr 3) in portrait and landscape, each
+//                port row chosen and edited: pictures to look at;
+//         motionopt  (F5, not in the default list; a host that knows controls.motion { when }, e.g.
+//                RTW_REPO=~/Code/retrowser-wt-motionopt, and a build whose shipped manifest keeps the object form)
+//                no ☰ Motion choice, no motion while option 3 is Off, the host's Allow prompt when the game's menu
+//                turns it On, rtw_motion after the tap, the sensors stopped when Off again;
 //         wrong  a ROM with one byte changed: the host's wrong-ROM warning, then the module's plain refusal;
 //         offline  every server stopped, the network off: reload, boot from the caches and the remembered ROM.
 //         beach  (F2, not in the default list) phone portrait 390x844 at dpr 3, the SAVE continued to the Beach with
@@ -373,6 +381,9 @@ async function touch() {
 // changes it (rtw_option_changed), the host remembers it across a reload; the Snap key (Digit1) reaches pad 0.
 async function options() {
   const ctx = await newCtx();
+  // F5: the host's touch layout shown on this desktop page too, so the Snap button (`when`: 1) can be seen to go
+  // (until the reload: the Sharp check below compares the desktop picture)
+  await ctx.addInitScript(() => { try { if (!sessionStorage.getItem('f5-touch-done')) localStorage.setItem('rtw:touch', JSON.stringify('on')); } catch { /* */ } });
   const page = await ctx.newPage();
   page.on('pageerror', (e) => errors.push(e.message));
   const L = logger(page);
@@ -410,12 +421,30 @@ async function options() {
     await press(page, 'ArrowRight'); await sleep(1500);
     await shot(page, 'options-pixels-sharp');
     await press(page, 'KeyX'); await sleep(1200);
+    // F5: the Motion Aim row (below Pixels): Off -> On (On is the left value)
+    await press(page, 'ArrowDown'); await sleep(1000);
+    await shot(page, 'options-motion-row');
+    await press(page, 'KeyX'); await sleep(1200);
+    await press(page, 'ArrowLeft'); await sleep(1200);
+    await shot(page, 'options-motion-on');
+    await press(page, 'KeyX'); await sleep(1200);
+    const snapShown = async () => { const b = await page.locator('[data-touch=x16]').first().boundingBox().catch(() => null); return !!b && b.width > 0; };
+    const snapBefore = await snapShown();
     await press(page, 'ArrowDown'); await sleep(1000);    // Return
     await press(page, 'KeyX');
     const ch = await L.wait(/rtw: option 1 = 0 changed in the game's Options menu/, 20);
     check('options: the game\'s menu reports the change (rtw_option_changed 1 = 0)', !!ch, ch ?? 'no line');
     const ch2 = await L.wait(/rtw: option 2 = 1 changed in the game's Options menu/, 20);
     check('options: Pixels -> Sharp is reported (rtw_option_changed 2 = 1)', !!ch2, ch2 ?? 'no line');
+    const ch3 = await L.wait(/rtw: option 3 = 1 changed in the game's Options menu/, 20);
+    check('options: Motion Aim -> On is reported (rtw_option_changed 3 = 1)', !!ch3, ch3 ?? 'no line');
+    // F5: the Snap extra button has "when": 1: the host takes it off its touch layout at once (no reload)
+    await sleep(500);
+    const snapAfter = await snapShown();
+    check('options: the Snap touch button goes at once when Snap Button is Off', snapBefore && !snapAfter,
+      `shown before ${snapBefore}, after ${snapAfter}; Shutter still shown ${!!(await page.locator('[data-touch=x17]').first().boundingBox().catch(() => null))}`);
+    await shot(page, 'options-snap-gone', true);
+    await page.evaluate(() => { sessionStorage.setItem('f5-touch-done', '1'); localStorage.setItem('rtw:touch', JSON.stringify('auto')); });
     await sleep(2000);
     await L.reset();
     await page.reload();
@@ -427,17 +456,68 @@ async function options() {
       (t1.match(/rtw: option.*/) || ['no rtw_option line'])[0]);
     check('options: after a reload the host passes Pixels Sharp (rtw_option 2 = 1)', /rtw: option 2 = 1 from the host/.test(t1),
       (t1.match(/rtw: option 2.*/) || ['no rtw_option 2 line'])[0]);
+    check('options: after a reload the host passes Motion Aim On (rtw_option 3 = 1)', /rtw: option 3 = 1 from the host/.test(t1),
+      (t1.match(/rtw: option 3.*/) || ['no rtw_option 3 line'])[0]);
+
     await toOptions('menu-reload');   // the rows show Off and Sharp
     // Sharp visible: the canvas has the view's size (not the Smooth 4:3 one) and the same menu screen is made of flat
     // runs of pixels (Smooth: options-menu, the first visit; Sharp: options-menu-reload)
     const t2 = await L.text();
     const cv = [...t2.matchAll(/rtw: canvas (\d+)x(\d+)/g)].map((m) => [+m[1], +m[2]]);
-    const last = cv[cv.length - 1];
+    // the last size the glue logged; none after the reload when the host's first canvas already had the view's size
+    // (F5: the first visit runs with the touch layout): then the canvas element itself
+    let last = cv[cv.length - 1];
+    if (!last) {
+      for (const f of page.frames()) {
+        const wh = await f.evaluate(() => { const c = document.querySelector('canvas'); return c ? [c.width, c.height] : null; }).catch(() => null);
+        if (wh) { last = wh; break; }
+      }
+    }
     const fs = flatness(menuShots[0]), fh = flatness(menuShots[1]);
     check('options: Sharp is visible (canvas at the view size, flat pixel runs)', last && last[0] * 3 !== last[1] * 4 && fh > fs + 0.15,
       `canvas ${last ? last.join('x') : '?'}; equal neighbours ${(fs * 100).toFixed(0)} % Smooth, ${(fh * 100).toFixed(0)} % Sharp`);
     writeFileSync(join(outDir, 'log-options.txt'), await L.text());
   } finally { L.stop(); await ctx.close(); }
+}
+
+// F5: the Options menu on a phone (dpr 3, as beach), portrait 390x844 and landscape 844x390: the whole page and the
+// picture alone with the menu open, then each port row chosen and its value help shown (A on the row, B back).
+// Pictures only, to look at (MENU_ROWS: how many port rows to visit below "Control Stick Setup", default 3).
+async function menu() {
+  const phone = await chromium.launch({ executablePath: chromePath, headless: true, args: [...launchArgs, '--force-device-scale-factor=3'] });
+  const rows = +(process.env.MENU_ROWS || 3);
+  try {
+    for (const [tag, vp] of [['portrait', { width: 390, height: 844 }], ['landscape', { width: 844, height: 390 }]]) {
+      const ctx = await phone.newContext({ viewport: vp, deviceScaleFactor: 3, isMobile: true, hasTouch: true, reducedMotion: 'reduce' });
+      await ctx.addInitScript((ep) => { try { if (location.hostname === 'localhost') localStorage.setItem('rtw:test-endpoints', ep); } catch { /* */ } }, endpoints);
+      const page = await ctx.newPage();
+      page.on('pageerror', (e) => errors.push(e.message));
+      const L = logger(page);
+      try {
+        await openGame(page, { remember: false });
+        await page.waitForSelector('[data-state=playing]', { timeout: 180000 });
+        await L.wait(/rtw: game started/, 90);
+        await sleep(3000);
+        await press(page, 'Enter', 200); await sleep(5000);
+        await press(page, 'Enter', 200); await sleep(2500);
+        await press(page, 'ArrowDown'); await sleep(1500);
+        await press(page, 'KeyX'); await sleep(3500);
+        await shot(page, `menu-${tag}-page`, true);
+        await shot(page, `menu-${tag}`);
+        for (let i = 0; i < 3; i++) { await press(page, 'ArrowDown'); await sleep(700); }
+        for (let r = 0; r < rows; r++) {
+          await press(page, 'ArrowDown'); await sleep(1000);
+          await shot(page, `menu-${tag}-row${r + 1}`);
+          await press(page, 'KeyX'); await sleep(1000);
+          await press(page, 'ArrowRight'); await sleep(1000);
+          await shot(page, `menu-${tag}-row${r + 1}-edit`);
+          await press(page, 'KeyC'); await sleep(1000);   // B: back, the value unchanged
+        }
+        check(`menu ${tag}: the Options menu was shown (pictures to look at)`, true);
+        writeFileSync(join(outDir, `log-menu-${tag}.txt`), await L.text());
+      } finally { L.stop(); await ctx.close(); }
+    }
+  } finally { await phone.close().catch(() => {}); }
 }
 
 // F2: a Beach frame in phone portrait, Pixels Smooth then Sharp (the host's stored inGame option, as after a change in
@@ -477,6 +557,94 @@ async function beach() {
     } finally { L.stop(); await ctx.close(); }
   }
   } finally { await phone.close().catch(() => {}); }
+}
+
+// F5: motion aim switched by the game's own Options row "Motion Aim" (option 3; manifest controls.motion = { when: 3 };
+// needs a host that knows the object form, e.g. RTW_REPO=~/Code/retrowser-wt-motionopt). Phone landscape 844x390,
+// touch, DeviceMotionEvent.requestPermission stubbed the iOS way (granted only from a tap), devicemotion events sent
+// all the time (a turn about the screen's normal and about gravity). Checks: the host's ☰ has no Motion choice; with
+// the option Off no rtw_motion reaches the module; Motion Aim On in the game's menu -> the host's "Allow" prompt; a tap
+// on it -> rtw_motion reaches the module ("rtw: motion aim: first rotation from the host"); Off again -> the host stops
+// reading (data-motion "off"). Pictures of the prompt.
+async function motionopt() {
+  const LAND = { width: 844, height: 390 };
+  const ctx = await newCtx({ viewport: LAND, deviceScaleFactor: 3, isMobile: true, hasTouch: true });
+  await ctx.addInitScript(() => {
+    window.__asks = 0;
+    let granted = false;
+    DeviceMotionEvent.requestPermission = () => {
+      window.__asks++;
+      const tap = window.event?.type;
+      if (!granted && tap !== 'click' && tap !== 'touchend') return Promise.reject(new DOMException('needs a tap', 'NotAllowedError'));
+      granted = true;
+      return Promise.resolve('granted');
+    };
+    // a phone held sideways that keeps turning slowly: rates in deg/s, gravity along the device's x (landscape 90)
+    setInterval(() => {
+      try {
+        window.dispatchEvent(new DeviceMotionEvent('devicemotion', {
+          rotationRate: { alpha: 20, beta: 15, gamma: 10 }, interval: 16,
+          accelerationIncludingGravity: { x: 9.81, y: 0, z: 0 }, acceleration: { x: 0, y: 0, z: 0 },
+        }));
+      } catch { /* */ }
+    }, 16);
+  });
+  const page = await ctx.newPage();
+  page.on('pageerror', (e) => errors.push(e.message));
+  const L = logger(page);
+  const first = /rtw: motion aim: first rotation from the host/;
+  const attr = (a) => page.getAttribute('[data-state=playing]', a).catch(() => null);
+  const motionRow = async (right) => {   // Options -> Motion Aim: left (On) or right (Off) -> Return
+    await sleep(3000);
+    await press(page, 'Enter', 200); await sleep(5000);
+    await press(page, 'Enter', 200); await sleep(2500);
+    await press(page, 'ArrowDown'); await sleep(1500);
+    await press(page, 'KeyX'); await sleep(3500);
+    for (let i = 0; i < 6; i++) { await press(page, 'ArrowDown'); await sleep(700); }
+    await press(page, 'KeyX'); await sleep(1000);
+    await press(page, right ? 'ArrowRight' : 'ArrowLeft'); await sleep(1000);
+    await press(page, 'KeyX'); await sleep(1000);
+    await press(page, 'ArrowDown'); await sleep(1000);
+    await press(page, 'KeyX');
+  };
+  try {
+    await openGame(page, { remember: false });
+    await page.waitForSelector('[data-state=playing]', { timeout: 180000 });
+    await L.wait(/rtw: game started/, 90);
+    await page.click('[data-action=menu]'); await page.waitForSelector('[data-state=menu]').catch(() => {});
+    const hasChoice = !!(await page.$('[data-field=motion-off], [data-field=motion-aim]'));
+    await shot(page, 'motionopt-menu', true);
+    if (await page.$('[data-action=close-menu]')) await page.click('[data-action=close-menu]').catch(() => {});
+    check('motionopt: the host\'s ☰ has no Motion choice (the game\'s option is the switch)', !hasChoice);
+    await sleep(4000);
+    check('motionopt: option 3 Off: no rtw_motion reaches the module', !first.test(await L.allText()), `data-motion ${await attr('data-motion')}`);
+    await motionRow(false);
+    const on = await L.wait(/rtw: option 3 = 1 changed in the game's Options menu/, 20);
+    check('motionopt: Motion Aim On in the game\'s menu (rtw_option_changed 3 = 1)', !!on, on ?? 'no line');
+    const ask = await page.waitForSelector('[data-state=motion-ask]', { timeout: 10000 }).catch(() => null);
+    await shot(page, 'motionopt-ask', true);
+    check('motionopt: the host asks for the motion sensors (Allow prompt)', !!ask);
+    if (ask) await page.click('[data-action=motion-allow]');
+    const got = await L.wait(first, 15);
+    check('motionopt: after Allow, rtw_motion reaches the module', !!got, `${got ?? 'no line'}; data-motion ${await attr('data-motion')}; asks ${await page.evaluate(() => window.__asks)}`);
+    await shot(page, 'motionopt-on', true);
+    // a new visit with the option kept On: the host asks at once without a tap (iOS answers only from a tap here, so
+    // the prompt again), then the game's menu turns it Off
+    await L.reset();
+    await page.reload();
+    await openGame(page, { stored: true });
+    await page.waitForSelector('[data-state=playing]', { timeout: 180000 });
+    const t1 = await L.wait(/rtw: option 3 = 1 from the host/, 90);
+    const ask2 = await page.waitForSelector('[data-state=motion-ask]', { timeout: 10000 }).catch(() => null);
+    check('motionopt: reload with the option On: the host passes it and asks again', !!t1 && !!ask2, `${t1 ?? 'no option line'}; prompt ${!!ask2}`);
+    if (ask2) await page.click('[data-action=motion-later]').catch(() => {});
+    await motionRow(true);
+    const off = await L.wait(/rtw: option 3 = 0 changed in the game's Options menu/, 20);
+    await sleep(1000);
+    const dm = await attr('data-motion');
+    check('motionopt: Motion Aim Off again: the host stops reading the sensors', !!off && dm === 'off', `${off ?? 'no line'}; data-motion ${dm}`);
+    writeFileSync(join(outDir, 'log-motionopt.txt'), await L.allText());
+  } finally { L.stop(); await ctx.close(); }
 }
 
 // F3 + F4 through the host's UI (needs a host with ☰ -> Motion "Off / Motion aim" and Full-screen landscape: RTW_REPO =
@@ -872,7 +1040,7 @@ async function offline() {
 try {
   for (const p of PHASES) {
     console.log(`== ${p}`);
-    try { await ({ desk, title, touch, options, beach, motion, wrong, offline })[p](); } catch (e) { check(`${p}: ran`, false, e.stack || String(e)); }
+    try { await ({ desk, title, touch, options, menu, beach, motion, motionopt, wrong, offline })[p](); } catch (e) { check(`${p}: ran`, false, e.stack || String(e)); }
   }
   check('no page errors', errors.length === 0, errors.slice(0, 3).join(' | '));
 } finally {
