@@ -1125,6 +1125,7 @@ src/main_menu/A0D4D0.c	portHelpSprite	static	0	-	void (a value read reads 0): no
 src/main_menu/A0D4D0.c	portLabelSprite	static	0	-	void (a value read reads 0): no IDO object row
 src/main_menu/A0D4D0.c	portMoveY	static	0	-	void (a value read reads 0): no IDO object row
 src/main_menu/A0D4D0.c	portNativeCopy	static	0	-	void (a value read reads 0): no IDO object row
+src/main_menu/A0D4D0.c	portRowsSpread	static	0	-	void (a value read reads 0): no IDO object row
 src/main_menu/A0D4D0.c	portTextDraw	static	0	-	void (a value read reads 0): no IDO object row
 src/main_menu/A0D4D0.c	portValueSprite	static	0	-	void (a value read reads 0): no IDO object row
 src/main_menu/A0D4D0.c	port_OptionsCreateRows	global	0	-	void (a value read reads 0): no IDO object row

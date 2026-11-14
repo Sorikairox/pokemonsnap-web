@@ -48,9 +48,9 @@ extern Sprite D_80342FF0_main_menu_vpk0;
 extern Sprite D_803434D0_main_menu_vpk0;
 
 #ifdef PORT
-/* port (F1 + F2 + F5; docs/port/notes/F1.md, F2.md, F5.md): the rows "Snap Button", "Pixels" and "Motion Aim" of the
- * Options menu (port options 1, 2, 3, port/ultra/pc_options.c; not in the save). The logic is in A0E190.c (row
- * indices 5, 6, 7). The menu's own rows, values and descriptions are pictures (IA16, white, the letters in the alpha,
+/* port (F1 + F2 + F5 + F6; docs/port/notes/F1.md, F2.md, F5.md, F6.md): the rows "Snap Button", "Pixels", "Motion
+ * Aim" and "Mouse Aim" of the Options menu (port options 1-4, port/ultra/pc_options.c; not in the save). The logic is
+ * in A0E190.c (row indices 5-8). The menu's own rows, values and descriptions are pictures (IA16, white, the letters in the alpha,
  * SP_TEXSHUF) in this scene's vpk0 data, drawn in a font of their own (no font of that look exists in the game). F5:
  * the port's rows are composed when the menu opens from the letters of those pictures, already decompressed in memory
  * from the player's ROM: each letter is cut out of a native picture (portGlyphs: which picture, column, width; no
@@ -61,8 +61,13 @@ extern Sprite D_803434D0_main_menu_vpk0;
 #define PORT_OPT_SNAP_BUTTON 1
 #define PORT_OPT_PIXELS 2  /* F2: "Pixels: Smooth / Sharp" (display only) */
 #define PORT_OPT_MOTION_AIM 3 /* F5: "Motion Aim: On / Off" (the host reads the gyroscope while it is on) */
-#define PORT_OPT_ROWS 3    /* rows 5, 6, 7 */
-#define PORT_OPT_BOX_DY (16 * (PORT_OPT_ROWS - 1)) /* the description box moves down (F2: 16, F5: 32) */
+#define PORT_OPT_MOUSE_AIM 4  /* F6: "Mouse Aim: On / Off" (the module asks for the mouse in camera control) */
+#define PORT_OPT_ROWS 4    /* rows 5, 6, 7, 8 */
+/* F6: nine rows (the four native ones, the port's, Return) no longer fit 16 pixels apart above the description box:
+ * they are 15 apart from y 65 (the native first row is at 73, 19 pixels below the title's line at 54; now 11), so
+ * Return stays at y 185 and the box where F5 put it (moved down 32: y 198-231 of 240) */
+#define PORT_ROW_Y(k) (65 + 15 * (k)) /* screen row k: 0-3 native, 4.. the port's, 4 + PORT_OPT_ROWS Return */
+#define PORT_OPT_BOX_DY 32
 void* port_menu_alloc(s32 slot, s32 bytes);
 s32 port_option_get(s32 id);
 GObj* port_OptValues[PORT_OPT_ROWS]; /* "< On >", "< Off >" (as D_800E8358_A0F8E8 for Sound) */
@@ -376,6 +381,9 @@ static PortOptRowText portOptRows[PORT_OPT_ROWS] = {
         "Sharp, crisp picture.\nPhotos and scores do not change." } },
     { PORT_OPT_MOTION_AIM, true, "Motion Aim", { "On", "Off" }, "Motion Aim setting.",
       { "Aim by turning your phone, held\nsideways. Allow it if asked.", "Aim with the Control Stick only." } },
+    { PORT_OPT_MOUSE_AIM, true, "Mouse Aim", { "On", "Off" }, "Mouse Aim setting.",
+      { "Aim with the mouse. Click to take a\npicture, hold the right button to focus.",
+        "Mouse is not used. Aim with the\nControl Stick." } },
 };
 
 static void portMoveY(GObj* gobj, s32 dy) {
@@ -386,18 +394,41 @@ static void portMoveY(GObj* gobj, s32 dy) {
     }
 }
 
-/* F1 + F2 + F5: rows 5 ("Snap Button"), 6 ("Pixels") and 7 ("Motion Aim") between "Control Stick Setup" (y 121) and
- * "Return", 16 pixels apart like the native rows; "Return" moves down 48 pixels (to y 185) and the description box
- * 32 (it then spans y 198-231 of 240, 13 pixels below "Return" as in F2) */
+/* F1 + F2 + F5 + F6: rows 5 ("Snap Button"), 6 ("Pixels"), 7 ("Motion Aim") and 8 ("Mouse Aim") between "Control
+ * Stick Setup" and "Return"; every row 15 pixels apart from y 65 (PORT_ROW_Y), "Return" at y 185 and the description
+ * box 32 pixels down (it then spans y 198-231 of 240, 13 pixels below "Return" as in F2) */
+static void portRowsSpread(void) {
+    SObj* sobj;
+    GObj* values[3];
+    s32 k;
+
+    values[0] = D_800E8358_A0F8E8; /* Sound, Z Button Setup, Control Stick Setup: two values each */
+    values[1] = D_800E835C_A0F8EC;
+    values[2] = D_800E8360_A0F8F0;
+    for (k = 0, sobj = D_800E8340_A0F8D0->data.sobj; k < 4; k++, sobj = sobj->next) { /* the native labels */
+        sobj->sprite.y = PORT_ROW_Y(k);
+    }
+    for (k = 0; k < 3; k++) {
+        values[k]->data.sobj->sprite.y = PORT_ROW_Y(k + 1);
+        values[k]->data.sobj->next->sprite.y = PORT_ROW_Y(k + 1);
+    }
+    /* their ":" (D_800E8338_A0F8C8 sprites 6-8, 2 pixels below the row) */
+    sobj = D_800E8338_A0F8C8->data.sobj->next->next->next->next->next->next;
+    for (k = 0; k < 3; k++, sobj = sobj->next) {
+        sobj->sprite.y = PORT_ROW_Y(k + 1) + 2;
+    }
+}
+
 void port_OptionsCreateRows(void) {
     Sprite spr;
     SObj* sobj;
     s32 i, k, y, value;
     PortOptRowText* row;
 
+    portRowsSpread();
     /* "Return" (the 5th label) moves down; the new labels become labels 5.. (port_OptLabels in A0E190.c) */
     sobj = D_800E8340_A0F8D0->data.sobj->next->next->next->next;
-    SET_SPRITE_POS(sobj->sprite, 43, 137 + 16 * PORT_OPT_ROWS);
+    SET_SPRITE_POS(sobj->sprite, 43, PORT_ROW_Y(4 + PORT_OPT_ROWS));
     /* the description box: the frame's lower line, its bottom line and its two sides (D_800E8338_A0F8C8 sprites 2-5),
      * and every description sprite */
     sobj = D_800E8338_A0F8C8->data.sobj->next->next;
@@ -412,7 +443,7 @@ void port_OptionsCreateRows(void) {
 
     for (i = 0; i < PORT_OPT_ROWS; i++) {
         row = &portOptRows[i];
-        y = 137 + 16 * i;
+        y = PORT_ROW_Y(4 + i);
         value = port_option_get(row->option);
         portLabelSprite(&spr, 6 * i, row->label);
         sobj = omGObjAddSprite(D_800E8340_A0F8D0, &spr);
