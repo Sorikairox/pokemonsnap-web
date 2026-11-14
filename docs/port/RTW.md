@@ -49,13 +49,14 @@ Needs `./pokemonsnap.z64` (`port/docker/run.sh rom PATH`) and the local retrowse
 | `options` | id 1 "Snap button", bool, default 1, `inGame` | F1: shown in the game's Options menu, kept by the host |
 | | id 2 "Sharp pixels", bool, default 0, `inGame` | F2: the Options menu's "Pixels Smooth / Sharp" row, kept by the host |
 | | id 3 "Motion aim", bool, default 0, `inGame` | F5: the Options menu's "Motion Aim On / Off" row; the host reads the gyroscope only while it is on |
+| | id 4 "Mouse aim", bool, default 1, `inGame` | F6: the Options menu's "Mouse Aim On / Off" row; mouse aim needs no manifest key (`rtw_pointer_lock` / `rtw_mouse` are standard) |
 | no `net`, `picture`, `icon` | | nothing needs them yet |
 
 ## Build (`port_build.py --rtw`, `link_rtw`)
 
 Same objects and flags as the harness link (ASYNCIFY, `-sGLOBAL_BASE=256MB`, 384 MiB) plus `port/rtw/rtw.c`, with
 `-sENVIRONMENT=worker -sDYNAMIC_EXECUTION=0 -sEXPORTED_RUNTIME_METHODS=HEAPU8`, `--js-library port/rtw/library_rtw.js`,
-`--pre-js port/rtw/rtw_glue.js`, exports `rtw_*` only (+ `port_rtw_retrace`, `port_rtw_test_log`) ->
+`--pre-js port/rtw/rtw_glue.js`, exports `rtw_*` only (F6: + `rtw_mouse`) (+ `port_rtw_retrace`, `port_rtw_test_log`) ->
 `port/build/rtw/link/`. The glue takes the wasm from `Module.wasmBinary`; its fetch paths are never reached.
 
 Shared-code hooks (weak defaults keep the harness as it was): `port_vbe_fix_defer` (pc_mem.c), `port_task_log`
@@ -96,6 +97,14 @@ Shared-code hooks (weak defaults keep the harness as it was): `port_vbe_fix_defe
 - **Motion** (F3): export `rtw_motion(port, yaw, pitch)` (port 0; 1/1024 degree, host-corrected for orientation)
   -> `port_motion_add`; logged once (`rtw: motion aim: first rotation from the host`). **Shutter** (F4): `rtw_input`
   keeps bits 0-17; a bit-17 press seen by any `rtw_input` reaches the next retrace.
+- **Mouse** (F6): import `rtw_pointer_lock(on)` (`port_pointer_lock`, called by pc_options.c when the module starts or
+  stops wanting the mouse: camera control in a course / pause menu, end of the course, option 4 off; logged `rtw:
+  pointer lock asked | given back`); export `rtw_mouse(dx, dy, buttons)` -> `port_mouse_add` (logged once: `rtw: mouse
+  aim: first mouse event from the host`). Host behaviour read in ~/Code/retrowser (player.tsx, runner.ts): the host
+  sends `rtw_mouse` once per display frame while it holds the lock, when the motion is not 0 or the buttons changed
+  (movementX/Y summed, clamped to +-32767); the capturing click happens before the lock, so it never reaches the module;
+  Esc releases the lock, the buttons go to 0 (one `rtw_mouse` with buttons 0 follows) and the prompt stays while the
+  module wants the mouse; `rtw_pointer_lock(0)` exits the lock and removes the prompt.
 - **New manifest key and the check tool** (TODO, F3 / F5): `controls.motion` is new in the host's interface, and F5's
   object form `{ "when": 3 }` is newer still (retrowser branch `motion-option`, not deployed yet). A check tool / host
   whose schema does not have a form rejects the manifest (`additionalProperties: false`, `type: boolean`), so
@@ -103,7 +112,7 @@ Shared-code hooks (weak defaults keep the harness as it was): `port_vbe_fix_defe
   `motion: true` instead (prints `rtw: TODO: ...`), then no key; the source manifest keeps the object. With
   `motion: true` the host offers its own ☰ Motion aim and the module still needs option 3 on. `rtw_motion` is reported
   as an unknown export (a warning) by such a tool.
-- **Imports**: `rtw_log`, `rtw_build_id`, `rtw_rumble`, `rtw_option_changed`. Not used yet: `rtw_export_file` (album photos as PNG would
+- **Imports**: `rtw_log`, `rtw_build_id`, `rtw_rumble`, `rtw_option_changed`, `rtw_pointer_lock` (F6). Not used yet: `rtw_export_file` (album photos as PNG would
   be a feature behind an option).
 - Test hooks: `Module.rtwManual` (no pacing; `node_host.mjs` steps `_port_rtw_retrace` itself), `port_rtw_test_log`.
 
@@ -169,5 +178,15 @@ touch layout at once; `menu` (opt-in) takes phone portrait / landscape pictures 
 (opt-in, `RTW_REPO=~/Code/retrowser-wt-motionopt`, a build made with that tool so `motion: { when: 3 }` ships): no ☰
 Motion choice, no motion while option 3 is Off, the host's Allow prompt when the game turns it On, rtw_motion after
 the tap, a reload passes it back and asks again, Off stops the sensors.
+
+F6: `mouse` (opt-in, desktop 1024x768, main host): option 4 Off then On in the game's Options menu (reported,
+passed back after reloads), no pointer lock in the title / menus; the SAVE continued to the Beach: `rtw: pointer lock
+asked` and the host's prompt in the course, the capturing click not seen by the game, left clicks take the tutorial's
+pictures (`[snap] photo taken ... (mouse click)`) until the cart moves, 400 px right / left = +-32 degrees and 200 px up
+= +16 (the `[mouse] movement stopped` line, +-5 %), right button held = zoom + a left click's picture + zoomed out on
+release, a middle click's apple, the pause menu gives the mouse back (no prompt) and camera control asks again, Esc
+(`document.exitPointerLock`: the Escape key does not release it in headless Chrome) leaves the prompt and the module
+does not call again, the click that captures again takes no picture. The `options` phase steps over the Mouse Aim row;
+`menu` visits 4 port rows.
 
 Checklist items not covered: a real phone (WebKit worker, real dpr), a gamepad, export of the save into an emulator.

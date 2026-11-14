@@ -613,7 +613,8 @@ async function motionopt() {
     await press(page, 'KeyX'); await sleep(1000);
     await press(page, right ? 'ArrowRight' : 'ArrowLeft'); await sleep(1000);
     await press(page, 'KeyX'); await sleep(1000);
-    await press(page, 'ArrowDown'); await sleep(1000);
+    await press(page, 'ArrowDown'); await sleep(1000);   // F6: Mouse Aim
+    await press(page, 'ArrowDown'); await sleep(1000);   // Return
     await press(page, 'KeyX');
   };
   try {

@@ -7,6 +7,25 @@ default branch `web`; retrowser build on the orphan branch `rtw-dist`; MIT licen
 orchestrator pushes, only to `pub`; never to `origin` (ethteck). Rebuild `rtw-dist` with `port/rtw/build.sh` (check
 `--rom` OK) after port changes. Older entries saying "private" / "never push" describe the state at their time.
 
+## F6 — 2026-11-14: mouse aim (option 4)
+
+Notes: **docs/port/notes/F6.md**. `web` commits 2721425 (module), 35dc87f (Options row), 9cf7496 (e2e), and the docs
+commit. No retrowser change: the deployed host's `rtw_pointer_lock` / `rtw_mouse` were enough.
+1. Port option 4 "Mouse Aim" (default On, `inGame`, the game's Options row from the native letters; all rows now 15 px
+   apart from y 65 so Return and the description box stay put). While the player has the camera in a course the
+   module asks for the mouse (kept for the whole course, given back in the pause menu, after the course, option Off;
+   after Esc it never asks again by itself).
+2. Mouse motion turns the view through F3's motion-aim path, 0.08 degree a pixel (3/4 zoomed in); "Control Stick
+   Setup: Reverse" not applied. Left click = a Shutter tap zoomed out / A once ready zoomed in; right button held =
+   zoom; middle click = an apple. `[mouse]` log lines; harness `--mouse F:DX:DY:BUTTONS[:LEN]`.
+3. Host suggestion (user's call, needs a deploy): hide the "Click to use the mouse" prompt on touch layouts; today a
+   phone shows it during courses while Mouse Aim is On.
+Verified: Beach route byte-identical to fede807's (7 PNGs, WAV, flash, read-back); mouse = motion path pictures
+byte-identical; gfx ALL OK; port-test 5000 OK; matching build OK; build.sh check OK (.z64 + .n64), romscan 0; e2e
+desk, touch, options, menu, wrong, offline PASS, motionopt + new mouse phase PASS on the final dist.
+**rtw-dist must be rebuilt / pushed by the orchestrator** (port/build/rtw/dist is built from the final commit).
+Downloads: none.
+
 ## F5 — 2026-11-14: native-looking Options rows, Snap button hidden when Off, Motion Aim in the game's menu
 
 Notes: **docs/port/notes/F5.md**. `web` commits 3d06d0c, e0a856c, fbbfc22 and this docs commit; retrowser worktree
