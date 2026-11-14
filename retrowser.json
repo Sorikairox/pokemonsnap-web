@@ -75,5 +75,11 @@
     }
   ],
   "license": "MIT",
-  "source": "https://github.com/Sorikairox/pokemonsnap-web"
+  "source": "https://github.com/Sorikairox/pokemonsnap-web",
+  "picture": {
+    "path": "cover.png",
+    "sha256": "17ca1f3c511fceaa80dcff17be39fd364b7d00b88a14e8a812c51f519d832c74",
+    "size": 297202,
+    "credit": "Box art © Nintendo / HAL Laboratory · image from libretro-thumbnails"
+  }
 }
