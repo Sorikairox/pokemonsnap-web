@@ -12,19 +12,19 @@
   "files": {
     "wasm": {
       "path": "pokemonsnap.wasm",
-      "sha256": "8b9fd884ba3335888abd3544b09736b04f4b2eef96b02260f3d9b1039998a093",
-      "size": 6437241
+      "sha256": "1082038cc6026c2ed3a0e180edd14075dee3b96237e18cf51e53ca09dceece10",
+      "size": 6449243
     },
     "js": {
       "path": "pokemonsnap.js",
-      "sha256": "818b33d1a4a6cddabe08fa4104e9ff2848fb0cfe46bb064df4e6daabe4d70916",
-      "size": 100835,
+      "sha256": "01e294fde887d401260f34ee19cbcc943c459c119cc92b13a8835ec8c3ca5577",
+      "size": 101141,
       "factory": "createPokemonSnap"
     },
     "data": [
       {
         "path": "pokemonsnap.romfill",
-        "sha256": "1be943e59c60c848953f2a5fb03617b273e2c07e44cc0205c4161e218d3ea217",
+        "sha256": "0f5cfc9280a756d4fc50a3c1e2c5993a578f1c242fa31c5ed985e496d94eedb6",
         "size": 5536
       }
     ]
@@ -72,14 +72,15 @@
       "type": "bool",
       "default": 0,
       "inGame": true
+    },
+    {
+      "id": 4,
+      "label": "Mouse aim",
+      "type": "bool",
+      "default": 1,
+      "inGame": true
     }
   ],
   "license": "MIT",
-  "source": "https://github.com/Sorikairox/pokemonsnap-web",
-  "picture": {
-    "path": "cover.png",
-    "sha256": "17ca1f3c511fceaa80dcff17be39fd364b7d00b88a14e8a812c51f519d832c74",
-    "size": 297202,
-    "credit": "Box art © Nintendo / HAL Laboratory · image from libretro-thumbnails"
-  }
+  "source": "https://github.com/Sorikairox/pokemonsnap-web"
 }

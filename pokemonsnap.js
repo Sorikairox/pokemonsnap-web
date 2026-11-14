@@ -2163,6 +2163,8 @@ async function createWasm() {
 
   var _rtw_option_changed = (id, value) => Module['rtw']['rtw_option_changed'](id, value);
 
+  var _rtw_pointer_lock = (on) => Module['rtw']['rtw_pointer_lock'](on);
+
   var _rtw_rumble = (port, on) => Module['rtw']['rtw_rumble'](port, on);
 
 for (let i = 0; i < 32; ++i) tempFixedLengthArray.push(new Array(i));;
@@ -2207,6 +2209,7 @@ var _port_option_get,
   _port_display_sharp,
   _port_option_set,
   _port_motion_add,
+  _port_mouse_add,
   _port_thread_dump,
   _port_set_pad,
   _port_vi_retrace,
@@ -2230,6 +2233,7 @@ var _port_option_get,
   _rtw_start,
   _rtw_input,
   _rtw_motion,
+  _rtw_mouse,
   _rtw_option,
   _rtw_pause,
   _rtw_resize,
@@ -2364,6 +2368,7 @@ function assignWasmExports(wasmExports) {
   Module['_port_display_sharp'] = _port_display_sharp = wasmExports['port_display_sharp'];
   Module['_port_option_set'] = _port_option_set = wasmExports['port_option_set'];
   Module['_port_motion_add'] = _port_motion_add = wasmExports['port_motion_add'];
+  Module['_port_mouse_add'] = _port_mouse_add = wasmExports['port_mouse_add'];
   Module['_port_thread_dump'] = _port_thread_dump = wasmExports['port_thread_dump'];
   Module['_port_set_pad'] = _port_set_pad = wasmExports['port_set_pad'];
   Module['_port_vi_retrace'] = _port_vi_retrace = wasmExports['port_vi_retrace'];
@@ -2387,6 +2392,7 @@ function assignWasmExports(wasmExports) {
   Module['_rtw_start'] = _rtw_start = wasmExports['rtw_start'];
   Module['_rtw_input'] = _rtw_input = wasmExports['rtw_input'];
   Module['_rtw_motion'] = _rtw_motion = wasmExports['rtw_motion'];
+  Module['_rtw_mouse'] = _rtw_mouse = wasmExports['rtw_mouse'];
   Module['_rtw_option'] = _rtw_option = wasmExports['rtw_option'];
   Module['_rtw_pause'] = _rtw_pause = wasmExports['rtw_pause'];
   Module['_rtw_resize'] = _rtw_resize = wasmExports['rtw_resize'];
@@ -2670,6 +2676,8 @@ var wasmImports = {
   rtw_log: _rtw_log,
   /** @export */
   rtw_option_changed: _rtw_option_changed,
+  /** @export */
+  rtw_pointer_lock: _rtw_pointer_lock,
   /** @export */
   rtw_rumble: _rtw_rumble
 };
