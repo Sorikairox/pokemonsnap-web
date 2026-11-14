@@ -12,8 +12,8 @@
   "files": {
     "wasm": {
       "path": "pokemonsnap.wasm",
-      "sha256": "1082038cc6026c2ed3a0e180edd14075dee3b96237e18cf51e53ca09dceece10",
-      "size": 6449243
+      "sha256": "4bcc1da787b268785db8cb22d4ecdf8b9f3654c174fdb3209eeeedfc904d18f7",
+      "size": 6462598
     },
     "js": {
       "path": "pokemonsnap.js",
@@ -24,7 +24,7 @@
     "data": [
       {
         "path": "pokemonsnap.romfill",
-        "sha256": "0f5cfc9280a756d4fc50a3c1e2c5993a578f1c242fa31c5ed985e496d94eedb6",
+        "sha256": "177ddc1037179a40d8cd9b574ac02f10b84cfa1ec046d6ac210eb9966658a231",
         "size": 5536
       }
     ]
@@ -78,6 +78,15 @@
       "label": "Mouse aim",
       "type": "bool",
       "default": 1,
+      "inGame": true
+    },
+    {
+      "id": 5,
+      "label": "Mouse speed",
+      "type": "int",
+      "default": 5,
+      "min": 1,
+      "max": 10,
       "inGame": true
     }
   ],
