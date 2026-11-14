@@ -23,6 +23,7 @@ rm -rf "$D"; mkdir -p "$D"
 python3 -I port/rtw/romfill.py "$Z64" "$L" "$D"
 cp "$L/pokemonsnap.js" "$D/"
 cp port/rtw/retrowser.json "$D/"
+cp port/rtw/cover.png "$D/"   # the cartridge picture (manifest "picture")
 # TODO(retrowser host, F3 / F5): `controls.motion` (motion aim) is new in the host's interface: F3 `true`, F5 the
 # object { "when": 3 } (motion aim switched by option 3, the Options menu's "Motion Aim" row). A check tool (and host)
 # whose schema does not know a form rejects the whole manifest (additionalProperties: false / type boolean). The

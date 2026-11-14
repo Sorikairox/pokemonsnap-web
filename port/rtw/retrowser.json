@@ -10,6 +10,7 @@
     "js": { "path": "pokemonsnap.js", "sha256": "", "size": 0, "factory": "createPokemonSnap" },
     "data": [{ "path": "pokemonsnap.romfill", "sha256": "", "size": 0 }]
   },
+  "picture": { "path": "cover.png", "sha256": "", "size": 0, "credit": "Box art © Nintendo / HAL Laboratory · image from libretro-thumbnails" },
   "video": "webgl",
   "hz": 60,
   "save": { "kind": "flash", "size": 131072 },
