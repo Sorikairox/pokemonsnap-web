@@ -21,7 +21,8 @@
     { "id": 1, "label": "Snap button", "type": "bool", "default": 1, "inGame": true },
     { "id": 2, "label": "Sharp pixels", "type": "bool", "default": 0, "inGame": true },
     { "id": 3, "label": "Motion aim", "type": "bool", "default": 0, "inGame": true },
-    { "id": 4, "label": "Mouse aim", "type": "bool", "default": 1, "inGame": true }
+    { "id": 4, "label": "Mouse aim", "type": "bool", "default": 1, "inGame": true },
+    { "id": 5, "label": "Mouse speed", "type": "int", "default": 5, "min": 1, "max": 10, "inGame": true }
   ],
   "license": "MIT",
   "source": "https://github.com/Sorikairox/pokemonsnap-web"

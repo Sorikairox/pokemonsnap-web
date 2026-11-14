@@ -17,6 +17,9 @@
  *   id 4  PORT_OPT_MOUSE_AIM    bool, default 1 (F6): mouse aim on. While the player controls the camera the module
  *                               asks the host for the mouse (rtw_pointer_lock); its motion turns the view, a left
  *                               click takes a picture, the right button held zooms, a middle click throws an apple.
+ *   id 5  PORT_OPT_MOUSE_SPEED  int 1..10, default 5 (F7): how far the view turns for a pixel of mouse motion
+ *                               (mouse_units: 5 = F6's 0.08 degree a pixel, each step x 1.25). The Options row
+ *                               "Mouse Speed  < N >" shows the number with the film counter's digits.
  *
  * The Zoom toggle and the inverted stick Y the player asked for are the game's own Options rows ("Z Button Setup:
  * Hold / Switch", "Control Stick Setup: Reverse / Normal"; player flags in the save, read by app_level/player.c), so
@@ -45,15 +48,20 @@
 #include <emscripten.h>
 #include <stdlib.h>
 
-enum { PORT_OPT_SNAP_BUTTON = 1, PORT_OPT_PIXELS, PORT_OPT_MOTION_AIM, PORT_OPT_MOUSE_AIM, PORT_OPT_COUNT };
+enum { PORT_OPT_SNAP_BUTTON = 1, PORT_OPT_PIXELS, PORT_OPT_MOTION_AIM, PORT_OPT_MOUSE_AIM, PORT_OPT_MOUSE_SPEED, PORT_OPT_COUNT };
+#define MOUSE_SPEED_MIN 1
+#define MOUSE_SPEED_MAX 10
 #define PORT_PAD_SNAP 0x10000
 #define PORT_PAD_SHUTTER 0x20000
 #define Z_TRIG 0x2000
 #define A_BUTTON 0x8000
 
-static int opt_value[PORT_OPT_COUNT] = {0, 1, 0, 0, 1};
+static int opt_value[PORT_OPT_COUNT] = {0, 1, 0, 0, 1, 5};
 
-static int option_valid(int id, int value) { return id > 0 && id < PORT_OPT_COUNT && (value == 0 || value == 1); }
+static int option_valid(int id, int value) {
+    if (id == PORT_OPT_MOUSE_SPEED) return value >= MOUSE_SPEED_MIN && value <= MOUSE_SPEED_MAX; /* int (F7) */
+    return id > 0 && id < PORT_OPT_COUNT && (value == 0 || value == 1);
+}
 
 /* option 2: the present mode in use = the menu's live preview while it is shown, else the option */
 void port_gfx_set_present_sharp(int on);
@@ -399,9 +407,12 @@ int port_motion_pitch(void) { return motion_latched_pitch; }
 /* ---------------------------------------------------------------- mouse aim (F6) */
 /* The host (rtw_mouse, port/rtw/rtw.c; harness --mouse): the mouse's motion since the previous call in CSS pixels and
  * its buttons (bit 0 left, 1 right, 2 middle), sent only while the host holds the pointer lock the module asked for
- * (rtw_pointer_lock, see mouse_lock_update). Motion turns the view through the motion-aim path at a fixed
- * MOUSE_UNITS_PER_PX; the buttons act in port_pad_filter. */
-#define MOUSE_UNITS_PER_PX 82 /* 1/1024 degree per pixel: 0.08 degree (about the picture's width = its field of view) */
+ * (rtw_pointer_lock, see mouse_lock_update). Motion turns the view through the motion-aim path at
+ * MOUSE_UNITS_PER_PX (F7: set by option 5, Mouse Speed); the buttons act in port_pad_filter. */
+/* F7: 1/1024 degree per pixel for Mouse Speed 1..10 (option 5): 82 x 1.25^(N - 5), rounded. 5 (the default) = F6's
+ * 82, 0.08 degree (moving across the picture turns about its field of view); 1 = 0.033 degree, 10 = 0.244 degree. */
+static const int mouse_units[MOUSE_SPEED_MAX] = {34, 42, 52, 66, 82, 102, 128, 160, 200, 250};
+#define MOUSE_UNITS_PER_PX mouse_units[opt_value[PORT_OPT_MOUSE_SPEED] - 1]
 #define MOUSE_ZOOM_NUM 3      /* zoomed in (fovy 40 instead of 55): 3/4 of that, so a pixel moves the picture alike */
 #define MOUSE_ZOOM_DEN 4
 #define MOUSE_SHOT_WAIT 60    /* retraces a click waits for the zoomed camera to take pictures before it is dropped */
@@ -457,7 +468,11 @@ static void mouse_lock_update(int fresh) {
     }
     if (want == mouse_lock) return;
     mouse_lock = want;
-    port_log("[mouse] %s at retrace %u (%s)\n", want ? "pointer lock asked" : "mouse given back", port_vi_count, why);
+    if (want)
+        port_log("[mouse] pointer lock asked at retrace %u (%s), Mouse Speed %d: %d/1024 degree a pixel\n", port_vi_count,
+                 why, opt_value[PORT_OPT_MOUSE_SPEED], MOUSE_UNITS_PER_PX);
+    else
+        port_log("[mouse] mouse given back at retrace %u (%s)\n", port_vi_count, why);
     if (!want) {
         mouse_buttons = mouse_pressed = 0;
         mouse_shot_pending = 0;
@@ -506,13 +521,47 @@ static void mouse_shot_poll(void) {
 /* ---------------------------------------------------------------- the Options menu rows (src/main_menu, #ifdef PORT) */
 /* image memory for the menu's text sprites (bitmaps + IA16 pixels), kept for the session: slot -> buffer */
 void *port_menu_alloc(int slot, int bytes) {
-    static void *buf[32];
-    static int size[32];
-    if (slot < 0 || slot >= 32 || bytes <= 0) return NULL;
+    static void *buf[48];
+    static int size[48];
+    if (slot < 0 || slot >= 48 || bytes <= 0) return NULL;
     if (size[slot] < bytes) {
         free(buf[slot]);
         buf[slot] = malloc((size_t)bytes); /* 8-byte aligned: enough for IA16 rows and Bitmap words */
         size[slot] = buf[slot] ? bytes : 0;
     }
     return buf[slot];
+}
+
+/* F7: the digits "0".."9" for the Options menu (src/main_menu/A0D4D0.c portGlyph; the menu's own pictures have none):
+ * the course's film counter digits (app_level/4FE780.c func_8035E52C_4FE93C: its table D_8038A034_52A444 points at
+ * ten RGBA16 8 x 16 pictures, white, 1-bit alpha, odd rows TEXSHUF-swapped, 0x160 bytes apart from ROM 0x529680; the
+ * app_level overlay is not loaded in the title scene), made the first time the menu asks from the player's ROM into
+ * 10 cells of 12 rows x 8 columns of coverage (0 / 255): the digit's rows 4-11 on rows 2-9, so it stands on the menu
+ * capitals' baseline (row 9). Written in vbe layout, as game code reads bytes. Why these digits: notes/F7.md. */
+#define FILM_DIGITS_ROM 0x529680u
+#define FILM_DIGIT_STRIDE 0x160u
+#define FILM_DIGIT_BYTES (8 * 16 * 2)
+#define FILM_DIGIT_DY 2 /* cell row r = picture row r + 2 */
+void *port_menu_digits(void) {
+    static unsigned char *cells;
+    unsigned char src[FILM_DIGIT_BYTES];
+    int d, r, k, y, off;
+    if (cells) return cells;
+    cells = malloc(10 * 12 * 8);
+    if (!cells) return NULL;
+    for (d = 0; d < 10; d++) {
+        if (port_rom_copy(src, FILM_DIGITS_ROM + d * FILM_DIGIT_STRIDE, FILM_DIGIT_BYTES) != 0) {
+            port_log("[option] menu digits: ROM copy failed\n");
+            free(cells);
+            return cells = NULL;
+        }
+        for (r = 0; r < 12; r++) {
+            for (k = 0; k < 8; k++) {
+                y = r + FILM_DIGIT_DY;
+                off = ((y * 8 + k) * 2) ^ ((y & 1) ? 4 : 0); /* TEXSHUF: odd rows' 32-bit words swapped */
+                vbe_st8(cells + (d * 12 + r) * 8 + k, y < 16 && (vbe_ld8(src + off + 1) & 1) ? 255 : 0);
+            }
+        }
+    }
+    return cells;
 }
