@@ -2301,7 +2301,6 @@ var _port_option_get,
   dynCall_ffffff,
   dynCall_vifiii,
   dynCall_viiiif,
-  dynCall_viiiiiiii,
   dynCall_fffffff,
   dynCall_iiiiiiiiiii,
   dynCall_vifffii,
@@ -2459,7 +2458,6 @@ function assignWasmExports(wasmExports) {
   dynCalls['ffffff'] = dynCall_ffffff = wasmExports['dynCall_ffffff'];
   dynCalls['vifiii'] = dynCall_vifiii = wasmExports['dynCall_vifiii'];
   dynCalls['viiiif'] = dynCall_viiiif = wasmExports['dynCall_viiiif'];
-  dynCalls['viiiiiiii'] = dynCall_viiiiiiii = wasmExports['dynCall_viiiiiiii'];
   dynCalls['fffffff'] = dynCall_fffffff = wasmExports['dynCall_fffffff'];
   dynCalls['iiiiiiiiiii'] = dynCall_iiiiiiiiiii = wasmExports['dynCall_iiiiiiiiiii'];
   dynCalls['vifffii'] = dynCall_vifffii = wasmExports['dynCall_vifffii'];

@@ -12,19 +12,19 @@
   "files": {
     "wasm": {
       "path": "pokemonsnap.wasm",
-      "sha256": "338ed2ac9e22c271bd81f5ecc369577b9153a85f6c441aedcae5c5265c645fc5",
-      "size": 6438199
+      "sha256": "8b9fd884ba3335888abd3544b09736b04f4b2eef96b02260f3d9b1039998a093",
+      "size": 6437241
     },
     "js": {
       "path": "pokemonsnap.js",
-      "sha256": "a1a6c427a2d2010becd2337516947748a40ab5be82be3e8e898c99072c06dc57",
-      "size": 100936,
+      "sha256": "818b33d1a4a6cddabe08fa4104e9ff2848fb0cfe46bb064df4e6daabe4d70916",
+      "size": 100835,
       "factory": "createPokemonSnap"
     },
     "data": [
       {
         "path": "pokemonsnap.romfill",
-        "sha256": "2410f64b7d89839a3034397f40fb345cd46eb686f6462bb22de59bd1268955b3",
+        "sha256": "1be943e59c60c848953f2a5fb03617b273e2c07e44cc0205c4161e218d3ea217",
         "size": 5536
       }
     ]
@@ -36,11 +36,14 @@
     "size": 131072
   },
   "controls": {
-    "motion": true,
+    "motion": {
+      "when": 3
+    },
     "extra": [
       {
         "bit": 16,
-        "label": "Snap"
+        "label": "Snap",
+        "when": 1
       },
       {
         "bit": 17,
@@ -59,6 +62,13 @@
     {
       "id": 2,
       "label": "Sharp pixels",
+      "type": "bool",
+      "default": 0,
+      "inGame": true
+    },
+    {
+      "id": 3,
+      "label": "Motion aim",
       "type": "bool",
       "default": 0,
       "inGame": true
