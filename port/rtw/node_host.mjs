@@ -29,6 +29,8 @@ const rtw = {
   rtw_log: (p, n) => { log(new TextDecoder().decode(mem().subarray(p, p + n))); return 0; },
   rtw_build_id: (p) => { mem().fill(0xAB, p, p + 32); return 0; },
   rtw_rumble: (port, on) => { log(`[host] rumble ${port} ${on}`); return 0; },
+  rtw_option_changed: (id, v) => { log(`[host] option ${id} = ${v}`); return 0; },
+  rtw_pointer_lock: (on) => { log(`[host] pointer lock ${on}`); return 0; },   // F6
 };
 M = await self[man.files.js.factory]({ wasmBinary: readFileSync(join(dir, man.files.wasm.path)), rtw, files,
   print: log, printErr: log, rtwManual: true });

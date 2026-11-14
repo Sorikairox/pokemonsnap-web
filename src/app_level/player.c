@@ -217,6 +217,9 @@ void screenCoorsToWorld(f32*, f32*, f32*);
 /* port (F1, port/ultra/pc_options.c): the Snap button learns, every game frame, that the player controls the camera
  * and how far the zoom is (gDirectionIndex: -1 zoomed in, -2 zooming, >= 0 zoomed out) */
 void port_snap_course(s32 direction, s32 zoomSwitch, s32 ready);
+/* F6 (mouse aim): every game frame of a course (the player object's update, which runs through the course's own
+ * scenes, messages and the pause menu): whether the pause menu is up */
+void port_course_frame(s32 paused);
 /* F4 (the Shutter): updateCameraZoomedIn, each zoomed-in frame: whether an A press takes a picture now */
 void port_snap_shoot_ready(s32 ready);
 /* the game took a picture (any A press that did; the film left after it): a log line for the tests */
@@ -430,7 +433,8 @@ void handleItemButtonsPress(GObj* obj) {
  * lost. Zoomed in it is relative to the cart, in [0, TAU). Pitch: ViewPitch, kept within the game's MinPitch..MaxPitch
  * (setPitchLimits); past a limit the view stops there. "Control Stick Setup" (IsAxisYInverted) is a stick setting and
  * is not applied: tilting the phone up always looks up. Held while zooming in or out and during a zoomed-in C-button
- * turn (applied when it ends), dropped while input is disabled. */
+ * turn (applied when it ends), dropped while input is disabled. F6: the mouse's motion arrives the same way (summed
+ * with the phone's by port_motion_take), and "Control Stick Setup" does not apply to it either. */
 int port_motion_take(s32 mode);
 int port_motion_pitch(void);
 static void port_motionAim(void) {
@@ -2337,6 +2341,9 @@ void handlePlayerCmd(GObjCmdData cmdData) {
 }
 
 void updatePlayer(GObj* arg0) {
+#ifdef PORT
+    port_course_frame(IsPaused);
+#endif
     cmdProcessCommands(handlePlayerCmd);
 }
 

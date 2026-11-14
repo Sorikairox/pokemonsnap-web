@@ -11,6 +11,9 @@
 //        bit 17 (0x20000), the Shutter: a tap is one whole picture, e.g. --input 4000:0x20000:3)
 //        [--motion F:YAW:PITCH[:LEN],...]   (F3: motion aim, as the retrowser host's rtw_motion: from retrace F, for
 //        LEN retraces (default 1), a rotation of YAW / PITCH (1/1024 degree, yaw > 0 right, pitch > 0 up) before each)
+//        [--mouse F:DX:DY:BUTTONS[:LEN],...]   (F6: mouse aim, as the retrowser host's rtw_mouse while it holds the
+//        pointer lock: from retrace F for LEN retraces (default 1), DX / DY pixels (dy > 0 down) and BUTTONS held (bit 0
+//        left, 1 right, 2 middle) before each; sent when there is motion or the buttons change, as the host does)
 // Serves port/web/{index.html,worker.js}, port/build/web/pokemonsnap.{js,wasm} and the player's ROM (/rom, read from
 // --rom: never copied, never served from the repo) on 127.0.0.1, starts Chrome headless (muted, SwiftShader, its own
 // temporary profile) and drives it over the DevTools protocol (the port/gfx/test/cdp.mjs method: node's own WebSocket,
@@ -41,8 +44,9 @@ const tapI = args.indexOf('--tap');
 const tap = tapI >= 0 ? [+args[tapI + 1], Number(args[tapI + 2])] : null;
 const input = (opt('input', '') || '').split(',').filter(Boolean).map((s) => s.split(':').map(Number));
 const motion = (opt('motion', '') || '').split(',').filter(Boolean).map((s) => s.split(':').map(Number));   // F3
+const mouse = (opt('mouse', '') || '').split(',').filter(Boolean).map((s) => s.split(':').map(Number));   // F6
 const logops = (opt('logops', '') || '').split(',').filter(Boolean).map(Number);
-const cfg = { frames, shots: [...shots].sort((a, b) => a - b), tap, input, motion, logops, pace: opt('pace', 'fast'), args: [],
+const cfg = { frames, shots: [...shots].sort((a, b) => a - b), tap, input, motion, mouse, logops, pace: opt('pace', 'fast'), args: [],
   readback: !args.includes('--no-readback'), tapEnd: +opt('tap-end', 0),
   audio: args.includes('--audio'), play: args.includes('--play') };
 if (opt('scene', null) !== null) cfg.args.push('--scene', String(+opt('scene')));

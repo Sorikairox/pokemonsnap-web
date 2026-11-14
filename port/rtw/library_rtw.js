@@ -5,6 +5,7 @@ addToLibrary({
   rtw_build_id: (p) => Module['rtw']['rtw_build_id'](p),
   rtw_rumble: (port, on) => Module['rtw']['rtw_rumble'](port, on),
   rtw_option_changed: (id, value) => Module['rtw']['rtw_option_changed'](id, value),   // F1: the game's Options menu
+  rtw_pointer_lock: (on) => Module['rtw']['rtw_pointer_lock'](on),   // F6: mouse aim
 
   port_rtw_host_frame: () => Module['rtwLoop'].hostFrame(),
   port_rtw_set_paused: (on) => Module['rtwLoop'].pause(on),

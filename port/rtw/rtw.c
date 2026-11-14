@@ -29,6 +29,7 @@ extern int rtw_log(const char *p, int len);
 extern int rtw_build_id(unsigned char *p);
 extern int rtw_rumble(int port, int on);
 extern int rtw_option_changed(int id, int value);
+extern int rtw_pointer_lock(int on);
 /* glue (library_rtw.js / rtw_glue.js) */
 extern void port_rtw_host_frame(void);
 extern void port_rtw_set_paused(int on);
@@ -237,6 +238,27 @@ EMSCRIPTEN_KEEPALIVE int rtw_motion(int port, int yaw, int pitch) {
     }
     if (started) port_motion_add(yaw, pitch);
     return 0;
+}
+
+/* F6, mouse aim (pc_options.c): the module asks for the mouse while the player controls the camera
+ * (port_pointer_lock -> rtw_pointer_lock; the host captures it on the player's next click, Esc gives it back) and
+ * gives it back elsewhere. rtw_mouse: the motion since the previous call (CSS pixels, summed by the host over a display
+ * frame) and the buttons (bit 0 left, 1 right, 2 middle), sent only while the host holds the lock. The click that
+ * captures the mouse is the host's, not the game's. */
+void port_mouse_add(int dx, int dy, int buttons);
+static int mouse_logged;
+EMSCRIPTEN_KEEPALIVE int rtw_mouse(int dx, int dy, int buttons) {
+    if (!mouse_logged) {
+        mouse_logged = 1;
+        logf_("rtw: mouse aim: first mouse event from the host (dx %d, dy %d, buttons %d, retrace %u)", dx, dy, buttons,
+              port_vi_count);
+    }
+    if (started) port_mouse_add(dx, dy, buttons);
+    return 0;
+}
+void port_pointer_lock(int on) { /* pc_options.c (weak there) */
+    logf_("rtw: pointer lock %s (retrace %u)", on ? "asked" : "given back", port_vi_count);
+    rtw_pointer_lock(on ? 1 : 0);
 }
 
 /* options (standard 4.7, F1): every option of retrowser.json is "inGame" (the game's Options menu shows it); the host

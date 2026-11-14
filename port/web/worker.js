@@ -7,6 +7,9 @@
 //               for `length` retraces
 //   cfg.motion  (F3) [[frame, yaw, pitch, length], ...]: port_motion_add(yaw, pitch) before each retrace from `frame`
 //               for `length` (default 1) retraces, as the retrowser host's rtw_motion before rtw_input
+//   cfg.mouse   (F6) [[frame, dx, dy, buttons, length], ...]: from `frame` for `length` (default 1) retraces, dx / dy
+//               pixels and the buttons held; port_mouse_add(dx, dy, buttons) before the retrace when there is motion
+//               or the buttons changed (the retrowser host's rtw_mouse)
 //   cfg.tapEnd  no taps from this retrace on (0: never stop)
 //   cfg.logops  [frame, ...]: log every display-list command of the tasks run during that retrace ([gfx] lines)
 //   cfg.pace    'fast' (as fast as the worker runs, one event-loop turn per retrace: deterministic screenshots) or
@@ -68,6 +71,7 @@ onmessage = async (e) => {
     print(`[web] main returned ${rc}; ${cfg.frames} retraces, pace ${cfg.pace}`);
     const shots = new Set(cfg.shots || []);
     const pcm = [];   // S7: Int16Array blocks drained per retrace
+    let mouseB = 0;   // F6: the buttons last sent
     let pcmFrames = 0;
     const t0 = performance.now();
     let tl = t0;
@@ -76,6 +80,9 @@ onmessage = async (e) => {
       let my = 0, mp = 0;   // F3: motion aim
       for (const [at, y, p, len] of cfg.motion || []) if (f >= at && f < at + (len || 1)) { my += y || 0; mp += p || 0; }
       if (my || mp) M._port_motion_add(my, mp);
+      let mx = 0, mdy = 0, mb = 0;   // F6: mouse aim
+      for (const [at, dx, dy, b, len] of cfg.mouse || []) if (f >= at && f < at + (len || 1)) { mx += dx || 0; mdy += dy || 0; mb |= b || 0; }
+      if (mx || mdy || mb !== mouseB) { M._port_mouse_add(mx, mdy, mb); mouseB = mb; }
       M._port_set_pad(0, mask, sx, sy);
       const lo = (cfg.logops || []).includes(f);
       if (lo) M._port_gfx_set_log_ops(1);
