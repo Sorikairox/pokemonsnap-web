@@ -4,7 +4,7 @@
 //   node port/rtw/e2e.mjs [build dir] [out dir]       (defaults port/build/rtw/dist, port_work/s9/e2e)
 // Env: RTW_REPO (default ~/Code/retrowser), ROM (default "./Pokemon Snap (USA).n64": the player's file, byte-swapped
 // .n64, converted by the host), SAVE (a FlashRAM image for the import / continue phase, default
-// port_work/merge_all/flash.fla), CHROME_PATH, PHASES (default "desk,touch,options,wrong,offline").
+// port_work/merge_all/flash.fla, else port_work/keep/merge_all-flash.fla), CHROME_PATH, PHASES (default "desk,touch,options,wrong,offline").
 // Phases: desk   boot from the ROM picker (remembered), input, audio, pacing, pause, save import -> Continue ->
 //                Oak's lab -> Save (the host stores the new image; snap_save.py checks it), reload + continue;
 //         touch  phone portrait 390x844 and landscape 844x390 (isMobile, hasTouch): pictures, touch A reaches the pad;
@@ -29,6 +29,9 @@
 //                stopped" line, +-5 %), the right button held zooms and a left click then takes a picture, a middle
 //                click throws an apple, the pause menu gives the mouse back (and camera control asks again), Esc
 //                releases it and the module does not ask again by itself;
+//                (F7) option 5 "Mouse Speed" 5 -> 7 in the same menu (the row drawn: its value region changes and is
+//                orange; reported, passed back after a reload), the turns then 1.25^2 larger (128/1024 degree a
+//                pixel: 400 px = 50 degrees, 200 px = 25);
 //         wrong  a ROM with one byte changed: the host's wrong-ROM warning, then the module's plain refusal;
 //         offline  every server stopped, the network off: reload, boot from the caches and the remembered ROM.
 //         beach  (F2, not in the default list) phone portrait 390x844 at dpr 3, the SAVE continued to the Beach with
@@ -55,7 +58,8 @@ const buildDir = resolve(process.argv[2] || join(ROOT, 'port/build/rtw/dist'));
 const outDir = resolve(process.argv[3] || join(ROOT, 'port_work/s9/e2e'));
 const RTW = process.env.RTW_REPO || join(process.env.HOME, 'Code/retrowser');
 const ROM = resolve(process.env.ROM || join(ROOT, 'Pokemon Snap (USA).n64'));
-const SAVE = resolve(process.env.SAVE || join(ROOT, 'port_work/merge_all/flash.fla'));
+// F7: port_work/merge_all/ may be gone; port_work/keep/ holds the same image
+const SAVE = resolve(process.env.SAVE || [join(ROOT, 'port_work/merge_all/flash.fla'), join(ROOT, 'port_work/keep/merge_all-flash.fla')].find(existsSync) || join(ROOT, 'port_work/merge_all/flash.fla'));
 const PHASES = (process.env.PHASES || 'desk,touch,options,wrong,offline').split(',');
 const chromePath = process.env.CHROME_PATH || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 mkdirSync(outDir, { recursive: true });
@@ -439,6 +443,7 @@ async function options() {
     const snapShown = async () => { const b = await page.locator('[data-touch=x16]').first().boundingBox().catch(() => null); return !!b && b.width > 0; };
     const snapBefore = await snapShown();
     await press(page, 'ArrowDown'); await sleep(1000);    // F6: Mouse Aim (left as it is)
+    await press(page, 'ArrowDown'); await sleep(1000);    // F7: Mouse Speed (left as it is)
     await press(page, 'ArrowDown'); await sleep(1000);    // Return
     await press(page, 'KeyX');
     const ch = await L.wait(/rtw: option 1 = 0 changed in the game's Options menu/, 20);
@@ -491,10 +496,10 @@ async function options() {
 
 // F5: the Options menu on a phone (dpr 3, as beach), portrait 390x844 and landscape 844x390: the whole page and the
 // picture alone with the menu open, then each port row chosen and its value help shown (A on the row, B back).
-// Pictures only, to look at (MENU_ROWS: how many port rows to visit below "Control Stick Setup", default 4).
+// Pictures only, to look at (MENU_ROWS: how many port rows to visit below "Control Stick Setup", default 5).
 async function menu() {
   const phone = await chromium.launch({ executablePath: chromePath, headless: true, args: [...launchArgs, '--force-device-scale-factor=3'] });
-  const rows = +(process.env.MENU_ROWS || 4);
+  const rows = +(process.env.MENU_ROWS || 5);
   try {
     for (const [tag, vp] of [['portrait', { width: 390, height: 844 }], ['landscape', { width: 844, height: 390 }]]) {
       const ctx = await phone.newContext({ viewport: vp, deviceScaleFactor: 3, isMobile: true, hasTouch: true, reducedMotion: 'reduce' });
@@ -614,6 +619,7 @@ async function motionopt() {
     await press(page, right ? 'ArrowRight' : 'ArrowLeft'); await sleep(1000);
     await press(page, 'KeyX'); await sleep(1000);
     await press(page, 'ArrowDown'); await sleep(1000);   // F6: Mouse Aim
+    await press(page, 'ArrowDown'); await sleep(1000);   // F7: Mouse Speed
     await press(page, 'ArrowDown'); await sleep(1000);   // Return
     await press(page, 'KeyX');
   };
@@ -1008,16 +1014,29 @@ async function mouse() {
     await press(page, 'ArrowDown'); await sleep(1500);
     await press(page, 'KeyX'); await sleep(3500);
   };
-  // the Options menu's Mouse Aim row (7 rows below Screen): A, left (On) or right (Off), A, down to Return, A
-  const setMouseAim = async (on) => {
+  // the Options menu's Mouse Aim row (7 rows below Screen): A, left (On) or right (Off), A; F7: then Mouse Speed
+  // (steps: right presses on it, 0 = left as it is; pictures of the row before, while editing and after), Return, A
+  const speedShots = [];
+  const setMouseAim = async (on, steps = 0) => {
     for (let i = 0; i < 7; i++) { await press(page, 'ArrowDown'); await sleep(700); }
     await press(page, 'KeyX'); await sleep(1200);
     await press(page, on ? 'ArrowLeft' : 'ArrowRight'); await sleep(1200);
     await shot(page, `mouse-option-${on ? 'on' : 'off'}`);
     await press(page, 'KeyX'); await sleep(1200);
-    await press(page, 'ArrowDown'); await sleep(1000);
+    await press(page, 'ArrowDown'); await sleep(1000);   // F7: Mouse Speed
+    if (steps) {
+      speedShots.push(await shot(page, 'mouse-speed-row'));
+      await press(page, 'KeyX'); await sleep(1200);
+      for (let i = 0; i < steps; i++) { await press(page, 'ArrowRight'); await sleep(800); }
+      await shot(page, 'mouse-speed-edit');
+      await press(page, 'KeyX'); await sleep(1200);
+      speedShots.push(await shot(page, 'mouse-speed-set'));
+    }
+    await press(page, 'ArrowDown'); await sleep(1000);   // Return
     await press(page, 'KeyX');
   };
+  const SPEED = 7, UNITS = { 5: 82, 7: 128 };   // pc_options.c mouse_units: 1/1024 degree a pixel
+  const deg = (px) => Math.round(px * UNITS[SPEED] / 1024 * 100) / 100;
   const boot = async (stored) => {
     console.log('mouse: ' + await openGame(page, { stored, remember: true }));
     await page.waitForSelector('[data-state=playing]', { timeout: 180000 });
@@ -1057,10 +1076,17 @@ async function mouse() {
     const t1 = await L.text();
     check('mouse: after a reload the host passes the remembered Off (rtw_option 4 = 0)', /rtw: option 4 = 0 from the host/.test(t1),
       (t1.match(/rtw: option 4.*/) || ['no rtw_option 4 line'])[0]);
+    check('mouse: after a reload the host passes Mouse Speed 5 (the default, rtw_option 5 = 5)', /rtw: option 5 = 5 from the host/.test(t1),
+      (t1.match(/rtw: option 5.*/) || ['no rtw_option 5 line'])[0]);
     await toOptions();
-    await setMouseAim(true);
+    await setMouseAim(true, SPEED - 5);
     const on = await L.wait(/rtw: option 4 = 1 changed in the game's Options menu/, 20);
     check('mouse: Mouse Aim -> On again is reported (rtw_option_changed 4 = 1)', !!on, on ?? 'no line');
+    const sp = await L.wait(new RegExp(`rtw: option 5 = ${SPEED} changed in the game's Options menu`), 20);
+    check(`mouse: Mouse Speed 5 -> ${SPEED} in the game's menu is reported (rtw_option_changed 5 = ${SPEED})`, !!sp, sp ?? 'no line');
+    const row = speedRow(speedShots[0], speedShots[1]);
+    check('mouse: the Mouse Speed row is drawn (its value region changes from 5 to 7 and shows orange digits)',
+      row.changed > 0.01 && row.orange > 20, `value region ${(row.changed * 100).toFixed(1)} % changed, ${row.orange} orange pixels`);
     await sleep(1500);
     await L.reset();
     await page.reload();
@@ -1068,6 +1094,8 @@ async function mouse() {
     const t2 = await L.text();
     check('mouse: after a second reload the host passes On (rtw_option 4 = 1)', /rtw: option 4 = 1 from the host/.test(t2),
       (t2.match(/rtw: option 4.*/) || ['no rtw_option 4 line'])[0]);
+    check(`mouse: after a second reload the host passes Mouse Speed ${SPEED} (rtw_option 5 = ${SPEED})`,
+      new RegExp(`rtw: option 5 = ${SPEED} from the host`).test(t2), (t2.match(/rtw: option 5.*/) || ['no rtw_option 5 line'])[0]);
 
     // 2. the save, the Beach: the module asks for the mouse when the player gets the camera
     await page.click('[data-action=menu]'); await sleep(500);
@@ -1115,8 +1143,9 @@ async function mouse() {
     check('mouse: left clicks take pictures (the shutter sequence started by the mouse: "[snap] photo taken ... (mouse click)")',
       taken >= 3, `${taken} picture(s); ${firstPhoto ? firstPhoto.replace(/^.*\[snap\] /, '') : 'no photo'}`);
     check('mouse: the Beach, the cart moving (camera control)', moving > 0.05, `${(moving * 100).toFixed(0)} % of pixels changed in 1 s`);
-    // 5. motion turns the view: 400 px right = +32 degrees, 200 px up = +16 (0.08 degree a pixel), the game's
-    // scenes take the camera now and then ("... dropped outside camera control"): then A and again
+    // 5. motion turns the view: at Mouse Speed 5 400 px right = +32 degrees, 200 px up = +16 (0.08 degree a pixel);
+    // F7: at Mouse Speed 7 (128/1024 degree a pixel) 1.25^2 that: +50 and +25. The game's scenes take the camera now
+    // and then ("... dropped outside camera control"): then A and again
     const turn = async (dx, dy, want, axis) => {
       let r = null;
       for (let i = 0; i < 6 && !(r && r.ok); i++) {
@@ -1134,13 +1163,16 @@ async function mouse() {
       }
       return r;
     };
-    const right = await turn(400, 0, 32, 'yaw');
-    check('mouse: 400 px to the right turns the view right by 32 degrees (+-5 %)', right.ok,
+    const lockLine = (await L.allText()).match(/\[mouse\] pointer lock asked.*Mouse Speed.*/)?.[0] ?? 'no line';
+    check(`mouse: the module uses Mouse Speed ${SPEED} (${UNITS[SPEED]}/1024 degree a pixel)`,
+      lockLine.includes(`Mouse Speed ${SPEED}: ${UNITS[SPEED]}/1024`), lockLine.replace(/^.*\[mouse\] /, ''));
+    const right = await turn(400, 0, deg(400), 'yaw');
+    check(`mouse: 400 px to the right turns the view right by ${deg(400)} degrees at Mouse Speed ${SPEED} (+-5 %; 32 at 5)`, right.ok,
       `${right.line}; picture change ${(right.change * 100).toFixed(0)} %`);
-    const left = await turn(-400, 0, -32, 'yaw');
-    check('mouse: 400 px back to the left: -32 degrees (+-5 %)', left.ok, `${left.line}; picture change ${(left.change * 100).toFixed(0)} %`);
-    const up = await turn(0, -200, 16, 'pitch');
-    check('mouse: 200 px up tilts the view up by 16 degrees (+-5 %)', up.ok, `${up.line}; picture change ${(up.change * 100).toFixed(0)} %`);
+    const left = await turn(-400, 0, -deg(400), 'yaw');
+    check(`mouse: 400 px back to the left: -${deg(400)} degrees (+-5 %)`, left.ok, `${left.line}; picture change ${(left.change * 100).toFixed(0)} %`);
+    const up = await turn(0, -200, deg(200), 'pitch');
+    check(`mouse: 200 px up tilts the view up by ${deg(200)} degrees (+-5 %; 16 at 5)`, up.ok, `${up.line}; picture change ${(up.change * 100).toFixed(0)} %`);
     await move(0, 200);   // back level
     await sleep(800);
     // 6. the right button held: zoom (hold), a left click while zoomed: a picture; let go: zoomed out
@@ -1207,6 +1239,30 @@ async function mouse() {
       `locked ${await lockedNow()}; ${(await L.text()).match(/\[snap\] photo taken.*/)?.[0] ?? 'no photo'}`);
     writeFileSync(join(outDir, 'log-mouse.txt'), await L.allText());
   } finally { L.stop(); await ctx.close(); }
+}
+
+// F7: the Mouse Speed row's value region (N64 x 163-278, y 171-183: A0D4D0.c PORT_ROW_Y(8)) in two screenshots of the
+// game's screen (the picture found as the non-black box): the share of its pixels that changed, and how many are orange
+// (the committed value's colour, FF8241 blended)
+function speedRow(fa, fb) {
+  const a = pngPixels(fa), b = pngPixels(fb);
+  if (a.w !== b.w || a.h !== b.h) return { changed: 0, orange: 0 };
+  let x0 = a.w, x1 = 0, y0 = a.h, y1 = 0;
+  for (let y = 0; y < a.h; y++) for (let x = 0; x < a.w; x++) {
+    const o = (y * a.w + x) * a.bpp;
+    if (a.px[o] + a.px[o + 1] + a.px[o + 2] > 24) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); }
+  }
+  const sx = (x1 - x0 + 1) / 320, sy = (y1 - y0 + 1) / 240;
+  let n = 0, changed = 0, orange = 0;
+  for (let y = Math.round(y0 + 171 * sy); y < Math.round(y0 + 183 * sy); y++) {
+    for (let x = Math.round(x0 + 163 * sx); x < Math.round(x0 + 278 * sx); x++) {
+      const o = (y * a.w + x) * a.bpp, p = (y * b.w + x) * b.bpp;
+      n++;
+      if (Math.abs(a.px[o] - b.px[p]) + Math.abs(a.px[o + 1] - b.px[p + 1]) + Math.abs(a.px[o + 2] - b.px[p + 2]) > 48) changed++;
+      if (b.px[p] > 200 && b.px[p + 1] > 90 && b.px[p + 1] < 170 && b.px[p + 2] < 110) orange++;
+    }
+  }
+  return { changed: n ? changed / n : 0, orange };
 }
 
 // share of pixels whose colour changed by more than 48 (sum of |dR|+|dG|+|dB|) between two same-size screenshots
