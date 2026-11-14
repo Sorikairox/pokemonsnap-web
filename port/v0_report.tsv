@@ -1121,9 +1121,11 @@ src/main_menu/A0D4D0.c	func_800E643C_A0D9CC	global	0	set	void (a value read read
 src/main_menu/A0D4D0.c	func_800E6480_A0DA10	global	0	call:func_800E643C_A0D9CC	void (a value read reads 0): a callee does not leave a value in v0 (func_800E643C_A0D9CC)
 src/main_menu/A0D4D0.c	func_800E672C_A0DCBC	global	0	call:omGObjAddSprite	returns v0: omGObjAddSprite
 src/main_menu/A0D4D0.c	func_800E6880_A0DE10	global	0	call:omGObjAddSprite	returns v0: omGObjAddSprite
+src/main_menu/A0D4D0.c	portHelpSprite	static	0	-	void (a value read reads 0): no IDO object row
+src/main_menu/A0D4D0.c	portLabelSprite	static	0	-	void (a value read reads 0): no IDO object row
 src/main_menu/A0D4D0.c	portMoveY	static	0	-	void (a value read reads 0): no IDO object row
-src/main_menu/A0D4D0.c	portTextGlyph	static	0	-	void (a value read reads 0): no IDO object row
-src/main_menu/A0D4D0.c	portTextSprite	static	0	-	void (a value read reads 0): no IDO object row
+src/main_menu/A0D4D0.c	portNativeCopy	static	0	-	void (a value read reads 0): no IDO object row
+src/main_menu/A0D4D0.c	portTextDraw	static	0	-	void (a value read reads 0): no IDO object row
 src/main_menu/A0D4D0.c	portValueSprite	static	0	-	void (a value read reads 0): no IDO object row
 src/main_menu/A0D4D0.c	port_OptionsCreateRows	global	0	-	void (a value read reads 0): no IDO object row
 src/main_menu/A0E190.c	OptionsMenu_BlinkValue	global	0		void (a value read reads 0): console v0 not only a call result ()

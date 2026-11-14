@@ -11,6 +11,9 @@
  *                               (port/gfx vi_frame, port_gfx_set_present_sharp; display only, never the native images
  *                               the game reads back). The Options row previews it live while it is being chosen
  *                               (port_display_preview), as the game's Sound row does with Stereo / Mono.
+ *   id 3  PORT_OPT_MOTION_AIM   bool, default 0 (F5): motion aim on. The host reads the gyroscope only while it is on
+ *                               (manifest controls.motion = { "when": 3 }); the module also drops rtw_motion while it
+ *                               is off, so with a host that still has its own ☰ Motion choice both must be on.
  *
  * The Zoom toggle and the inverted stick Y the player asked for are the game's own Options rows ("Z Button Setup:
  * Hold / Switch", "Control Stick Setup: Reverse / Normal"; player flags in the save, read by app_level/player.c), so
@@ -32,20 +35,20 @@
  * Motion aim (session F3): the host's rtw_motion deltas (port/rtw/rtw.c; harness --motion) are summed here for pad 0
  * (port_motion_add, 1/1024 degree) and taken by app_level/player.c every game frame while the player controls the
  * camera (port_motion_take, #ifdef PORT in handleAnalogStick), which turns the view by exactly that angle. Motion that
- * arrives while player.c does not take it (menus, pause, cut-scenes, C-button turns) is dropped. No port option: the
- * host's "Motion aim" toggle (default off, it owns the permission prompt) is the only switch; with it off no motion
- * arrives and nothing changes. */
+ * arrives while player.c does not take it (menus, pause, cut-scenes, C-button turns) is dropped. F5: option 3 (the
+ * Options menu's "Motion Aim" row) is the switch: the host reads the sensors (and asks for the permission) only while
+ * it is on, and motion that arrives while it is off is dropped here; with it off nothing changes. */
 #include "pc_os.h"
 #include <emscripten.h>
 #include <stdlib.h>
 
-enum { PORT_OPT_SNAP_BUTTON = 1, PORT_OPT_PIXELS, PORT_OPT_COUNT };
+enum { PORT_OPT_SNAP_BUTTON = 1, PORT_OPT_PIXELS, PORT_OPT_MOTION_AIM, PORT_OPT_COUNT };
 #define PORT_PAD_SNAP 0x10000
 #define PORT_PAD_SHUTTER 0x20000
 #define Z_TRIG 0x2000
 #define A_BUTTON 0x8000
 
-static int opt_value[PORT_OPT_COUNT] = {0, 1, 0};
+static int opt_value[PORT_OPT_COUNT] = {0, 1, 0, 0};
 
 static int option_valid(int id, int value) { return id > 0 && id < PORT_OPT_COUNT && (value == 0 || value == 1); }
 
@@ -248,6 +251,13 @@ static void motion_report(const char *why) {
 
 /* the host (rtw_motion, port 0; harness --motion): the device's rotation since the previous call */
 EMSCRIPTEN_KEEPALIVE void port_motion_add(int yaw, int pitch) {
+    if (!opt_value[PORT_OPT_MOTION_AIM]) { /* F5: motion aim is off (the Options menu's row) */
+        static int told;
+        if (!told) port_log("[motion] dropped: option 3 (Motion Aim) is off\n");
+        told = 1;
+        motion_yaw = motion_pitch = 0;
+        return;
+    }
     if (port_vi_count - motion_taken > SNAP_STALE) { /* the camera is not the player's: drop */
         motion_dropped += iabs(yaw) + iabs(pitch);
         if (motion_active) {
@@ -293,33 +303,15 @@ int port_motion_take(int mode) {
 }
 int port_motion_pitch(void) { return motion_latched_pitch; }
 
-/* ---------------------------------------------------------------- the Options menu row (src/main_menu, #ifdef PORT) */
-/* The game's 12-pixel font (4 bits per pixel, 12 x 12, 370 glyphs in UIText_CharTable order) lives in the window
- * overlay's data (D_80378254_84BA04, used by window/text.c), which the title scene does not load: copied from the
- * player's ROM into port memory (vbe layout, as game code reads it) the first time the menu asks. */
-#define FONT12_ROM 0x84BA04u
-#define FONT12_SIZE (370 * 72)
-void *port_menu_font12(void) {
-    static unsigned char *font;
-    if (!font) {
-        font = malloc(FONT12_SIZE);
-        if (!font || port_rom_copy(font, FONT12_ROM, FONT12_SIZE) != 0) {
-            port_log("[option] menu font: ROM copy failed\n");
-            free(font);
-            font = NULL;
-        }
-    }
-    return font;
-}
-
-/* image memory for the menu's text sprites (bitmaps + RGBA16 pixels), kept for the session: slot -> buffer */
+/* ---------------------------------------------------------------- the Options menu rows (src/main_menu, #ifdef PORT) */
+/* image memory for the menu's text sprites (bitmaps + IA16 pixels), kept for the session: slot -> buffer */
 void *port_menu_alloc(int slot, int bytes) {
-    static void *buf[16];
-    static int size[16];
-    if (slot < 0 || slot >= 16 || bytes <= 0) return NULL;
+    static void *buf[32];
+    static int size[32];
+    if (slot < 0 || slot >= 32 || bytes <= 0) return NULL;
     if (size[slot] < bytes) {
         free(buf[slot]);
-        buf[slot] = malloc((size_t)bytes); /* 8-byte aligned: enough for RGBA16 rows and Bitmap words */
+        buf[slot] = malloc((size_t)bytes); /* 8-byte aligned: enough for IA16 rows and Bitmap words */
         size[slot] = buf[slot] ? bytes : 0;
     }
     return buf[slot];

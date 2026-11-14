@@ -21,13 +21,15 @@ s8 D_800E8374_A0F904;
 s8 D_800E8375_A0F905;
 SObj* D_800E8378_A0F908[5];
 #ifdef PORT
-/* port (F1, F2): rows 5 "Snap Button" (option 1) and 6 "Pixels" (option 2) (A0D4D0.c port_OptionsCreateRows), shown
- * between rows 3 and 4. The labels need 7 entries; the console's array keeps its size (the port lays this .bss out at
- * the console's addresses, a 6th entry would be D_800E838C_A0F91C), so this file uses port_OptLabels instead. */
-#define PORT_OPT_ROWS 2
+/* port (F1, F2, F5): rows 5 "Snap Button" (option 1), 6 "Pixels" (option 2) and 7 "Motion Aim" (option 3) (A0D4D0.c
+ * port_OptionsCreateRows), shown between rows 3 and 4. The labels need 8 entries; the console's array keeps its size
+ * (the port lays this .bss out at the console's addresses, a 6th entry would be D_800E838C_A0F91C), so this file uses
+ * port_OptLabels instead. */
+#define PORT_OPT_ROWS 3
 #define PORT_ROW_FIRST 5
 #define PORT_ROW_PORT(row) ((row) >= PORT_ROW_FIRST && (row) < PORT_ROW_FIRST + PORT_OPT_ROWS)
 #define PORT_OPT_PIXELS 2
+#define PORT_OPT_MOTION_AIM 3
 SObj* port_OptLabels[5 + PORT_OPT_ROWS];
 #define D_800E8378_A0F908 port_OptLabels
 extern GObj* port_OptValues[PORT_OPT_ROWS];
@@ -35,12 +37,12 @@ extern GObj* port_OptHelp[PORT_OPT_ROWS];
 s32 port_option_get(s32 id);
 void port_option_set_by_game(s32 id, s32 value);
 void port_display_preview(s32 sharp);
-/* per row: the option, and whether the left value (choice 0) means option value 1 (Snap: On) or 0 (Pixels: Smooth) */
-static const s8 port_OptId[PORT_OPT_ROWS] = { 1, PORT_OPT_PIXELS };
-static const s8 port_OptLeftIsOne[PORT_OPT_ROWS] = { 1, 0 };
+/* per row: the option, and whether the left value (choice 0) means option value 1 (On) or 0 (Pixels: Smooth) */
+static const s8 port_OptId[PORT_OPT_ROWS] = { 1, PORT_OPT_PIXELS, PORT_OPT_MOTION_AIM };
+static const s8 port_OptLeftIsOne[PORT_OPT_ROWS] = { 1, 0, 1 };
 s8 port_OptChoice[PORT_OPT_ROWS]; /* 0 left, 1 right (as D_800E8394_A0F924 for Sound) */
 /* the rows from the top: 0 1 2 3, the port's rows, 4 (Return) */
-static const s8 port_RowOrder[5 + PORT_OPT_ROWS] = { 0, 1, 2, 3, 5, 6, 4 };
+static const s8 port_RowOrder[5 + PORT_OPT_ROWS] = { 0, 1, 2, 3, 5, 6, 7, 4 };
 
 static s8 portRowStep(s8 row, s32 step) {
     s32 i;
@@ -398,7 +400,7 @@ s8 OptionsMenu_ChooseRow(void) { /* was func_800E7700_A0EC90 */
         } else {
             if (temp_v0_2->pressedButtons & STICK_SLOW_UP) {
                 auPlaySoundWithParams(0x41, 0x7FFF, 0x40, 1.0f, 0);
-#ifdef PORT /* rows from the top: 0 1 2 3 5 (Snap Button) 6 (Pixels) 4 (Return) */
+#ifdef PORT /* rows from the top: 0 1 2 3 5 (Snap Button) 6 (Pixels) 7 (Motion Aim) 4 (Return) */
                 D_800E8374_A0F904 = portRowStep(D_800E8374_A0F904, -1);
 #else
                 D_800E8374_A0F904--;
@@ -457,6 +459,7 @@ void OptionsMenu_BlinkValue(GObj* arg0) { /* was func_800E7950_A0EEE0 */
 #ifdef PORT
         case PORT_ROW_FIRST:
         case PORT_ROW_FIRST + 1:
+        case PORT_ROW_FIRST + 2:
             sobj = port_OptValues[D_800E8374_A0F904 - PORT_ROW_FIRST]->data.sobj;
             break;
 #endif
@@ -525,6 +528,7 @@ void OptionsMenu_ShowValueHelp(GObj* arg0) { /* was func_800E7B24_A0F0B4 */
 #ifdef PORT
         case PORT_ROW_FIRST:
         case PORT_ROW_FIRST + 1:
+        case PORT_ROW_FIRST + 2:
             var_v0 = port_OptHelp[D_800E8374_A0F904 - PORT_ROW_FIRST]->data.sobj;
             break;
 #endif
@@ -566,6 +570,7 @@ void OptionsMenu_EditRow(void) { /* was func_800E7C40_A0F1D0 */
 #ifdef PORT
         case PORT_ROW_FIRST:
         case PORT_ROW_FIRST + 1:
+        case PORT_ROW_FIRST + 2:
             sobj = port_OptValues[D_800E8374_A0F904 - PORT_ROW_FIRST]->data.sobj;
             D_800E8375_A0F905 = port_OptChoice[D_800E8374_A0F904 - PORT_ROW_FIRST];
             break;
@@ -634,6 +639,7 @@ void OptionsMenu_EditRow(void) { /* was func_800E7C40_A0F1D0 */
 #ifdef PORT
         case PORT_ROW_FIRST:
         case PORT_ROW_FIRST + 1:
+        case PORT_ROW_FIRST + 2:
             port_OptChoice[D_800E8374_A0F904 - PORT_ROW_FIRST] = D_800E8375_A0F905;
             sobj = port_OptHelp[D_800E8374_A0F904 - PORT_ROW_FIRST]->data.sobj;
             break;
@@ -676,6 +682,7 @@ void OptionsMenu_Run(void) { /* was func_800E7F98_A0F528 */
 #ifdef PORT
             case PORT_ROW_FIRST:
             case PORT_ROW_FIRST + 1:
+            case PORT_ROW_FIRST + 2:
 #endif
                 OptionsMenu_EditRow();
                 break;

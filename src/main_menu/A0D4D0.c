@@ -48,105 +48,254 @@ extern Sprite D_80342FF0_main_menu_vpk0;
 extern Sprite D_803434D0_main_menu_vpk0;
 
 #ifdef PORT
-/* port (F1, docs/port/notes/F1.md; F2, notes/F2.md): the "Snap Button" and "Pixels" rows of the Options menu (port
- * options 1 and 2, port/ultra/pc_options.c; not in the save). The menu's own rows are pictures from the ROM; these
- * rows' words are the port's own, drawn when the menu opens with the game's 12-pixel font (window/text.c's glyphs and
- * widths; the window overlay is not loaded in this scene, so port_menu_font12 copies the glyphs from the player's ROM)
- * into RGBA16 sprites placed and coloured like the menu's own. The rows sit between "Control Stick Setup" and
- * "Return" (which moves down two rows, with the description box); the logic is in A0E190.c (row indices 5, 6). */
+/* port (F1 + F2 + F5; docs/port/notes/F1.md, F2.md, F5.md): the rows "Snap Button", "Pixels" and "Motion Aim" of the
+ * Options menu (port options 1, 2, 3, port/ultra/pc_options.c; not in the save). The logic is in A0E190.c (row
+ * indices 5, 6, 7). The menu's own rows, values and descriptions are pictures (IA16, white, the letters in the alpha,
+ * SP_TEXSHUF) in this scene's vpk0 data, drawn in a font of their own (no font of that look exists in the game). F5:
+ * the port's rows are composed when the menu opens from the letters of those pictures, already decompressed in memory
+ * from the player's ROM: each letter is cut out of a native picture (portGlyphs: which picture, column, width; no
+ * pixel is in the source), "O" is the native "C" with its left half mirrored, "x" (no native one) is drawn here. Words
+ * are kerned like the native text (letters 3 pixels apart on each row, a space is 4 more); the bullet and the "< >"
+ * brackets are copied from "Screen" and "< Mono >". The new pictures are IA16 like the native ones and get the same
+ * attributes and colours, so they blink, highlight and blend exactly as the native rows do. */
 #define PORT_OPT_SNAP_BUTTON 1
 #define PORT_OPT_PIXELS 2  /* F2: "Pixels: Smooth / Sharp" (display only) */
-#define PORT_OPT_ROWS 2    /* rows 5, 6 */
-#define PORT_OPT_BOX_DY 16 /* F2: the description box moves down to make room for the second row */
-s32 UIText_GetCharIndex(s32 ch);
-s32 UIText_Ascii2WideChar(s32 c);
-extern u8 UIText_WidthTable[2][370];
-void* port_menu_font12(void);
+#define PORT_OPT_MOTION_AIM 3 /* F5: "Motion Aim: On / Off" (the host reads the gyroscope while it is on) */
+#define PORT_OPT_ROWS 3    /* rows 5, 6, 7 */
+#define PORT_OPT_BOX_DY (16 * (PORT_OPT_ROWS - 1)) /* the description box moves down (F2: 16, F5: 32) */
 void* port_menu_alloc(s32 slot, s32 bytes);
 s32 port_option_get(s32 id);
 GObj* port_OptValues[PORT_OPT_ROWS]; /* "< On >", "< Off >" (as D_800E8358_A0F8E8 for Sound) */
 GObj* port_OptHelp[PORT_OPT_ROWS];   /* what each value does, shown while choosing (as D_800E834C_A0F8DC) */
 
-#define PORT_TEXT_SHADOW 0x0001 /* black, opaque: window/text.c's shadow palette on a clear image */
+/* the alpha (coverage) of pixel (x, y) of a native IA16 menu picture: its bitmaps lie side by side in bands of
+ * bmheight rows; SP_TEXSHUF pictures have the two 32-bit words of every 64-bit word of their odd rows swapped (as
+ * TMEM wants them) */
+static s32 portNativeAlpha(Sprite* spr, s32 x, s32 y) {
+    Bitmap* bm = spr->bitmap;
+    s32 i, bx = 0, by = 0, off;
 
-/* a glyph code of window/text.c: ASCII, or a two-byte EUC code (bytes >= 0x80) */
-static s32 portTextChar(u8** s) {
-    u8* p = *s;
-    if (p[0] >= 0x80 && p[1] != 0) {
-        *s = p + 2;
-        return (p[0] << 8) | p[1];
+    if (x < 0 || y < 0 || x >= spr->width || y >= spr->height) {
+        return 0;
     }
-    *s = p + 1;
-    return p[0] == ' ' ? 0 : UIText_Ascii2WideChar(p[0]);
-}
-
-static s32 portTextWidth(char* str) {
-    u8* s = (u8*) str;
-    s32 w = 0;
-    while (*s != 0 && *s != '\n') {
-        s32 ch = portTextChar(&s);
-        w += ch == 0 ? 4 : UIText_WidthTable[1][UIText_GetCharIndex(ch)] + 1;
-    }
-    return w;
-}
-
-/* UIText_PrintChar16 (window/text.c) on a clear RGBA16 image, white text, shadow offset 2 */
-static void portTextGlyph(u16* img, s32 w, s32 h, s32 x, s32 y, u8* glyph) {
-    s32 i, j, k, ci, v;
-    u16* p;
-
-    for (i = 0; i < 12; i++) {
-        for (j = 0; j < 12; j++) {
-            ci = glyph[(i * 12 + j) >> 1];
-            ci = (j & 1) ? (ci >> 4) & 0xF : ci & 0xF;
-            if (ci == 0 || x + j < 0 || x + j >= w || y + i >= h) {
-                continue;
+    for (i = 0; i < spr->nbitmaps; i++, bm++) {
+        if (y >= by && y < by + bm->actualHeight && x >= bx && x < bx + bm->width) {
+            off = ((bm->t + y - by) * bm->width_img + bm->s + x - bx) * 2;
+            if ((spr->attr & SP_TEXSHUF) && ((y - by) & 1)) {
+                off ^= 4;
             }
-            p = img + (y + i) * w + x + j;
-            v = 255 * ci / 15;
-            *p = ((v << 8) & 0xF800) | ((v << 3) & 0x7C0) | ((v >> 2) & 0x3E) | 1;
-            for (k = 1; k <= 2; k++) {
-                if (y + i + k < h && x + j + k < w) {
-                    p[k * (w + 1)] = PORT_TEXT_SHADOW;
+            return ((u8*) bm->buf)[off + 1];
+        }
+        bx += bm->width;
+        if (bx >= spr->width) {
+            bx = 0;
+            by += spr->bmheight;
+        }
+    }
+    return 0;
+}
+
+/* where each letter is in the native pictures: the picture, its first column and width, and the top of its line
+ * (a letter keeps its rows from there: the native letters sit a row higher or lower, as they were drawn) */
+typedef struct {
+    char ch;
+    Sprite* spr;
+    s16 x, w, top;
+} PortGlyphSrc;
+
+#define PORT_GLYPH_H 12
+static PortGlyphSrc portGlyphs[] = {
+    { ',', &D_80324770_main_menu_vpk0, 125, 2, 3 }, /* "Press Z Button to focus, and press" */
+    { '.', &D_8032F360_main_menu_vpk0, 130, 1, 3 }, /* "Display setting on screen." */
+    { 'A', &D_80332CB0_main_menu_vpk0, 9, 5, 3 },   /* "Adjust orange frame by moving Control Stick." */
+    { 'B', &D_803280C0_main_menu_vpk0, 19, 5, 3 },  /* "Z Button setting." */
+    { 'C', &D_80316230_main_menu_vpk0, 9, 5, 3 },   /* "Control Stick setting." */
+    { 'D', &D_8032F360_main_menu_vpk0, 9, 5, 3 },
+    { 'H', &D_80341C70_main_menu_vpk0, 18, 6, 0 },  /* "< Hold >" */
+    { 'M', &D_80342150_main_menu_vpk0, 18, 5, 0 },  /* "< Mono >" */
+    { 'N', &D_80342630_main_menu_vpk0, 12, 5, 0 },  /* "<Normal>" */
+    { 'P', &D_80324770_main_menu_vpk0, 9, 5, 3 },
+    { 'R', &D_8032BA10_main_menu_vpk0, 9, 5, 3 },   /* "Return to title screen." */
+    { 'S', &D_80342FF0_main_menu_vpk0, 13, 4, 0 },  /* "<Stereo>" */
+    { 'Z', &D_803280C0_main_menu_vpk0, 9, 5, 3 },
+    { 'a', &D_80342630_main_menu_vpk0, 35, 5, 0 },
+    { 'b', &D_80332CB0_main_menu_vpk0, 115, 4, 3 },
+    { 'c', &D_803434D0_main_menu_vpk0, 34, 3, 0 },  /* "<Switch>" */
+    { 'd', &D_80341C70_main_menu_vpk0, 33, 4, 0 },
+    { 'e', &D_80342FF0_main_menu_vpk0, 24, 4, 0 },
+    { 'f', &D_80332CB0_main_menu_vpk0, 81, 4, 3 },
+    { 'g', &D_8032F360_main_menu_vpk0, 77, 4, 3 },
+    { 'h', &D_803434D0_main_menu_vpk0, 39, 4, 0 },
+    { 'i', &D_803434D0_main_menu_vpk0, 26, 1, 0 },
+    { 'j', &D_80332CB0_main_menu_vpk0, 22, 3, 3 },
+    { 'k', &D_80316230_main_menu_vpk0, 69, 4, 3 },
+    { 'l', &D_80341C70_main_menu_vpk0, 30, 1, 0 },
+    { 'm', &D_80342630_main_menu_vpk0, 28, 5, 0 },
+    { 'n', &D_80342150_main_menu_vpk0, 30, 4, 0 },
+    { 'o', &D_80342FF0_main_menu_vpk0, 40, 4, 0 },
+    { 'p', &D_8032F360_main_menu_vpk0, 24, 3, 3 },
+    { 'r', &D_80342FF0_main_menu_vpk0, 30, 3, 0 },
+    { 's', &D_8032F360_main_menu_vpk0, 19, 3, 3 },
+    { 't', &D_80342FF0_main_menu_vpk0, 19, 4, 0 },
+    { 'u', &D_80339F50_main_menu_vpk0, 19, 4, 3 },  /* "Sound setting." */
+    { 'v', &D_80332CB0_main_menu_vpk0, 141, 4, 3 },
+    { 'w', &D_803434D0_main_menu_vpk0, 19, 5, 0 },
+    { 'y', &D_8032F360_main_menu_vpk0, 38, 4, 3 },
+};
+
+/* "x": the native text has none; drawn in the font's manner (x-height rows 4-9, soft corners) */
+static const u8 portGlyphX[6][4] = {
+    { 255, 60, 60, 255 }, { 160, 230, 230, 160 }, { 20, 255, 255, 20 },
+    { 20, 255, 255, 20 }, { 160, 230, 230, 160 }, { 255, 60, 60, 255 },
+};
+
+/* one letter's coverage, PORT_GLYPH_H rows from the line's top; returns its width (0: no such letter) */
+static s32 portGlyph(char ch, u8 out[PORT_GLYPH_H][8]) {
+    static const s8 mirrorC[5] = { 0, 1, 2, 1, 0 }; /* "O" = "C" with its left half mirrored */
+    PortGlyphSrc* g;
+    s32 i, r, k, w;
+
+    for (r = 0; r < PORT_GLYPH_H; r++) {
+        for (k = 0; k < 8; k++) {
+            out[r][k] = 0;
+        }
+    }
+    if (ch == 'x') {
+        for (r = 0; r < 6; r++) {
+            for (k = 0; k < 4; k++) {
+                out[4 + r][k] = portGlyphX[r][k];
+            }
+        }
+        return 4;
+    }
+    for (i = 0; i < ARRAY_COUNT(portGlyphs); i++) {
+        g = &portGlyphs[i];
+        if (g->ch == (ch == 'O' ? 'C' : ch)) {
+            w = ch == 'O' ? 5 : g->w;
+            for (r = 0; r < PORT_GLYPH_H; r++) {
+                for (k = 0; k < w; k++) {
+                    out[r][k] = portNativeAlpha(g->spr, g->x + (ch == 'O' ? mirrorC[k] : k), g->top + r);
                 }
+            }
+            return w;
+        }
+    }
+    return 0;
+}
+
+/* where the next letter goes after one at px: the first column (at least one empty column between them) at which on
+ * every row their solid pixels (coverage >= 128) are at least 3 apart, as the native text is set */
+static s32 portKern(u8 prev[PORT_GLYPH_H][8], s32 pw, s32 px, u8 next[PORT_GLYPH_H][8], s32 nw) {
+    s32 x = px + pw + 1;
+    s32 r, k, pr, nl;
+
+    for (r = 0; r < PORT_GLYPH_H; r++) {
+        pr = -1;
+        nl = -1;
+        for (k = 0; k < pw; k++) {
+            if (prev[r][k] >= 128) {
+                pr = k;
+            }
+        }
+        for (k = nw - 1; k >= 0; k--) {
+            if (next[r][k] >= 128) {
+                nl = k;
+            }
+        }
+        if (pr >= 0 && nl >= 0 && x + nl - (px + pr) < 3) {
+            x = px + pr + 3 - nl;
+        }
+    }
+    return x;
+}
+
+/* the width of a line of text ('\n' or the end stops it) */
+static s32 portTextWidth(char* s) {
+    u8 g[2][PORT_GLYPH_H][8];
+    s32 w[2], x = 0, cur = 0, have = 0, space = 0, end = 0;
+
+    for (; *s != 0 && *s != '\n'; s++) {
+        if (*s == ' ') {
+            space += 4;
+            continue;
+        }
+        w[cur] = portGlyph(*s, g[cur]);
+        if (w[cur] == 0) {
+            continue;
+        }
+        x = have ? portKern(g[cur ^ 1], w[cur ^ 1], x, g[cur], w[cur]) + space : 0;
+        end = x + w[cur];
+        have = 1;
+        space = 0;
+        cur ^= 1;
+    }
+    return end;
+}
+
+/* text into an IA16 image (white, the letters' coverage as alpha): lines 12 pixels apart from (x, y) */
+static void portTextDraw(u16* img, s32 iw, s32 ih, char* s, s32 x0, s32 y) {
+    u8 g[2][PORT_GLYPH_H][8];
+    s32 w[2], x = x0, cur = 0, have = 0, space = 0, r, k, a;
+
+    for (; *s != 0; s++) {
+        if (*s == '\n') {
+            y += 12;
+            x = x0;
+            have = 0;
+            space = 0;
+            continue;
+        }
+        if (*s == ' ') {
+            space += 4;
+            continue;
+        }
+        w[cur] = portGlyph(*s, g[cur]);
+        if (w[cur] == 0) {
+            continue;
+        }
+        if (have) {
+            x = portKern(g[cur ^ 1], w[cur ^ 1], x, g[cur], w[cur]) + space;
+        }
+        for (r = 0; r < PORT_GLYPH_H; r++) {
+            for (k = 0; k < w[cur]; k++) {
+                a = g[cur][r][k];
+                if (a != 0 && x + k >= 0 && x + k < iw && y + r >= 0 && y + r < ih) {
+                    img[(y + r) * iw + x + k] = 0xFF00 | a;
+                }
+            }
+        }
+        have = 1;
+        space = 0;
+        cur ^= 1;
+    }
+}
+
+/* columns x0..x0+w-1, rows 0..h-1 of a native picture copied into an IA16 image at (dx, dy) */
+static void portNativeCopy(u16* img, s32 iw, s32 ih, Sprite* spr, s32 x0, s32 w, s32 h, s32 dx, s32 dy) {
+    s32 r, k, a;
+
+    for (r = 0; r < h; r++) {
+        for (k = 0; k < w; k++) {
+            a = portNativeAlpha(spr, x0 + k, r);
+            if (a != 0 && dx + k < iw && dy + r < ih) {
+                img[(dy + r) * iw + dx + k] = 0xFF00 | a;
             }
         }
     }
 }
 
-/* a w x h text sprite: str ('\n' starts a line 14 pixels lower) from (x, y); centre: x is the middle of each line.
- * w is a power of two (the sprite library loads rows with LoadBlock, whose dxt steps exactly only through rows of 2^n
- * words: a 240-pixel image came out smeared on its right side). Sprite fields as UIElement_Create sets them
- * (window/element.c), one bitmap per 4 KiB. */
-static void portTextSprite(Sprite* spr, s32 slot, s32 w, s32 h, char* str, s32 x, s32 y, s32 centre) {
-    u8* font = port_menu_font12();
+/* a clear w x h IA16 sprite (w a power of two: the sprite library loads rows with LoadBlock, whose dxt steps exactly
+ * only through rows of 2^n words; F1 trap) whose image the caller fills. Fields as UIElement_Create sets them
+ * (window/element.c), one bitmap per 4 KiB; attributes as the native pictures' minus SP_TEXSHUF (rows unshuffled). */
+static u16* portSprite(Sprite* spr, s32 slot, s32 w, s32 h) {
     s32 tileH = 0x1000 / 2 / w;
     s32 n = (h + tileH - 1) / tileH;
     Bitmap* bm = port_menu_alloc(slot, n * sizeof(Bitmap) + w * h * 2);
     u16* img = (u16*) (bm + n);
-    u8* s = (u8*) str;
-    s32 i, cx;
+    s32 i;
 
     for (i = 0; i < w * h; i++) {
-        img[i] = 0;
-    }
-    cx = centre ? x - portTextWidth(str) / 2 : x;
-    while (*s != 0 && font != NULL) {
-        s32 ch;
-        if (*s == '\n') {
-            s++;
-            y += 14;
-            cx = centre ? x - portTextWidth((char*) s) / 2 : x;
-            continue;
-        }
-        ch = portTextChar(&s);
-        if (ch == 0) {
-            cx += 4;
-        } else {
-            i = UIText_GetCharIndex(ch);
-            portTextGlyph(img, w, h, cx, y, font + i * 72);
-            cx += UIText_WidthTable[1][i] + 1;
-        }
+        img[i] = 0xFF00;
     }
     for (i = 0; i < n; i++) {
         bm[i].width = w;
@@ -172,50 +321,61 @@ static void portTextSprite(Sprite* spr, s32 slot, s32 w, s32 h, char* str, s32 x
     spr->nbitmaps = n;
     spr->ndisplist = NUM_DL(n);
     spr->bmheight = spr->bmHreal = tileH;
-    spr->bmfmt = G_IM_FMT_RGBA;
+    spr->bmfmt = G_IM_FMT_IA;
     spr->bmsiz = G_IM_SIZ_16b;
     spr->bitmap = bm;
     spr->rsp_dl = spr->rsp_dl_next = NULL;
     spr->frac_s = spr->frac_t = 0;
+    return img;
 }
 
-/* "<  On  >": brackets at the edges like the menu's "< Mono >"; the word centred at `centre`, '>' at `right` */
-static void portValueSprite(Sprite* spr, s32 slot, char* word, s32 centre, s32 right) {
-    portTextSprite(spr, slot, 64, 16, word, centre, 1, true);
-    {
-        u8* font = port_menu_font12();
-        u16* img = (u16*) (spr->bitmap + spr->nbitmaps);
-        if (font != NULL) {
-            portTextGlyph(img, 64, 16, 0, 1, font + UIText_GetCharIndex(UIText_Ascii2WideChar('<')) * 72);
-            portTextGlyph(img, 64, 16, right, 1, font + UIText_GetCharIndex(UIText_Ascii2WideChar('>')) * 72);
-        }
-    }
+/* a row's label: the native bullet ("Screen"'s first 7 columns) and the words from column 8, as "Screen" */
+static void portLabelSprite(Sprite* spr, s32 slot, char* label) {
+    u16* img = portSprite(spr, slot, 128, PORT_GLYPH_H);
+
+    portNativeCopy(img, 128, PORT_GLYPH_H, &D_8033F498_main_menu_vpk0, 0, 7, 10, 0, 0);
+    portTextDraw(img, 128, PORT_GLYPH_H, label, 8, 0);
+}
+
+/* a value, 56 pixels like the native "< Mono >": its brackets ("< Mono >"'s columns 0-9 and 45-55) and the word
+ * centred on column 28 */
+static void portValueSprite(Sprite* spr, s32 slot, char* word) {
+    u16* img = portSprite(spr, slot, 64, PORT_GLYPH_H);
+
+    portNativeCopy(img, 64, PORT_GLYPH_H, &D_80342150_main_menu_vpk0, 0, 10, 10, 0, 0);
+    portNativeCopy(img, 64, PORT_GLYPH_H, &D_80342150_main_menu_vpk0, 45, 11, 10, 45, 0);
+    portTextDraw(img, 64, PORT_GLYPH_H, word, 28 - portTextWidth(word) / 2, 0);
+}
+
+/* a description: 238 x 30 like the native ones (their lines start at column 8, rows 3 and 15) */
+static void portHelpSprite(Sprite* spr, s32 slot, char* text) {
+    u16* img = portSprite(spr, slot, 256, 30);
+
+    portTextDraw(img, 256, 30, text, 8, 3);
 }
 
 void func_800E643C_A0D9CC(SObj* sobj, s8 arg1);
 
-/* the port's rows, in screen order below "Control Stick Setup" (row index 5 + i in A0E190.c) */
+/* the port's rows, in screen order below "Control Stick Setup" (row index 5 + i in A0E190.c). Only letters of
+ * portGlyphs (and O, x) can be written: the native pictures have no E F G I J K L Q T U V W X Y q z, no digits. */
 typedef struct {
     s32 option;      /* port option id (pc_options.c) */
-    s32 leftIsOne;   /* the left value means option value 1 (Snap: On / Off) or 0 (Pixels: Smooth / Sharp) */
+    s32 leftIsOne;   /* the left value means option value 1 (On / Off) or 0 (Pixels: Smooth / Sharp) */
     char* label;
     char* values[2]; /* left, right */
-    s32 centre, right; /* value sprites: the word's centre, the '>' */
     char* help;      /* the row's description */
     char* valueHelp[2];
 } PortOptRowText;
 
 static PortOptRowText portOptRows[PORT_OPT_ROWS] = {
-    { PORT_OPT_SNAP_BUTTON, true, "Snap Button", { "On", "Off" }, 28, 51,
-      "Snap: an extra touch button (key 1).\nHold to aim, let go to take a picture.",
-      { "On: hold Snap to zoom in and aim,\nlet go of it to take a picture.",
-        "Off: the Snap button does nothing.\nUse Z and A to take pictures." } },
-    /* F2: "Smooth" is 44 pixels wide: the brackets sit 1 pixel further out than Snap's (the native "<Reverse>" is as
-     * tight) */
-    { PORT_OPT_PIXELS, false, "Pixels", { "Smooth", "Sharp" }, 29, 52,
-      "Pixels: how the game's picture is\nenlarged to fit your screen.",
-      { "Smooth: soft, blended pixels,\nlike the picture on a TV.",
-        "Sharp: crisp, square pixels.\nPhotos and scores do not change." } },
+    { PORT_OPT_SNAP_BUTTON, true, "Snap Button", { "On", "Off" }, "Snap Button setting.",
+      { "Hold Snap to focus, and release\nSnap to take a picture.",
+        "Snap Button does nothing.\nPress Z and A to take pictures." } },
+    { PORT_OPT_PIXELS, false, "Pixels", { "Smooth", "Sharp" }, "Picture sharpness setting.",
+      { "Smooth, soft picture.\nPhotos and scores do not change.",
+        "Sharp, crisp picture.\nPhotos and scores do not change." } },
+    { PORT_OPT_MOTION_AIM, true, "Motion Aim", { "On", "Off" }, "Motion Aim setting.",
+      { "Aim by turning your phone, held\nsideways. Allow it if asked.", "Aim with the Control Stick only." } },
 };
 
 static void portMoveY(GObj* gobj, s32 dy) {
@@ -226,16 +386,16 @@ static void portMoveY(GObj* gobj, s32 dy) {
     }
 }
 
-/* F1 + F2: rows 5 ("Snap Button", option 1) and 6 ("Pixels", option 2) between "Control Stick Setup" (y 121) and
- * "Return", 16 pixels apart like the native rows; "Return" and the description box below them move down 32 pixels
- * (the box then spans y 182-213 of 240: inside the picture, clear of the rows) */
+/* F1 + F2 + F5: rows 5 ("Snap Button"), 6 ("Pixels") and 7 ("Motion Aim") between "Control Stick Setup" (y 121) and
+ * "Return", 16 pixels apart like the native rows; "Return" moves down 48 pixels (to y 185) and the description box
+ * 32 (it then spans y 198-231 of 240, 13 pixels below "Return" as in F2) */
 void port_OptionsCreateRows(void) {
     Sprite spr;
     SObj* sobj;
     s32 i, k, y, value;
     PortOptRowText* row;
 
-    /* "Return" (the 5th label) moves down; the new labels become labels 5, 6 (D_800E8378_A0F908[5], [6]) */
+    /* "Return" (the 5th label) moves down; the new labels become labels 5.. (port_OptLabels in A0E190.c) */
     sobj = D_800E8340_A0F8D0->data.sobj->next->next->next->next;
     SET_SPRITE_POS(sobj->sprite, 43, 137 + 16 * PORT_OPT_ROWS);
     /* the description box: the frame's lower line, its bottom line and its two sides (D_800E8338_A0F8C8 sprites 2-5),
@@ -252,42 +412,36 @@ void port_OptionsCreateRows(void) {
 
     for (i = 0; i < PORT_OPT_ROWS; i++) {
         row = &portOptRows[i];
-        y = 136 + 16 * i;
+        y = 137 + 16 * i;
         value = port_option_get(row->option);
-        portTextSprite(&spr, 6 * i, 128, 16, row->label, 7, 1, false);
-        {
-            /* the rows' bullet: a 2 x 2 dot with its shadow */
-            u16* img = (u16*) (spr.bitmap + spr.nbitmaps);
-            img[6 * 128 + 2] = img[6 * 128 + 3] = img[7 * 128 + 2] = img[7 * 128 + 3] = 0xFFFF;
-            img[7 * 128 + 4] = img[8 * 128 + 4] = img[8 * 128 + 3] = PORT_TEXT_SHADOW;
-        }
+        portLabelSprite(&spr, 6 * i, row->label);
         sobj = omGObjAddSprite(D_800E8340_A0F8D0, &spr);
         SET_SPRITE_POS(sobj->sprite, 43, y);
         sobj->sprite.red = sobj->sprite.green = sobj->sprite.blue = 0x80;
 
         sobj = omGObjAddSprite(D_800E8338_A0F8C8, &D_8033ED70_main_menu_vpk0); /* the row's ":" */
-        SET_SPRITE_POS(sobj->sprite, 158, y + 3);
+        SET_SPRITE_POS(sobj->sprite, 158, y + 2);
         sobj->sprite.attr = SP_TEXSHUF | SP_TRANSPARENT;
 
         /* choice 0 = the left value, as the Sound row's Stereo / Mono; highlighted: the current one */
-        portValueSprite(&spr, 6 * i + 1, row->values[0], row->centre, row->right);
+        portValueSprite(&spr, 6 * i + 1, row->values[0]);
         port_OptValues[i] = ohCreateSprite(0xE, ohUpdateDefault, 0, 0x80000000, renDrawSprite, 1, 0x80000000, -1, &spr,
                                            0, NULL, 1);
         sobj = port_OptValues[i]->data.sobj;
-        SET_SPRITE_POS(sobj->sprite, 162, y);
+        SET_SPRITE_POS(sobj->sprite, 163, y);
         func_800E643C_A0D9CC(sobj, value != row->leftIsOne);
-        portValueSprite(&spr, 6 * i + 2, row->values[1], row->centre, row->right);
+        portValueSprite(&spr, 6 * i + 2, row->values[1]);
         sobj = omGObjAddSprite(port_OptValues[i], &spr);
-        SET_SPRITE_POS(sobj->sprite, 221, y);
+        SET_SPRITE_POS(sobj->sprite, 222, y);
         func_800E643C_A0D9CC(sobj, value == row->leftIsOne);
 
         /* the row's description (D_800E8344_A0F8D4, index 5 + i) and its values' (shown while choosing) */
-        portTextSprite(&spr, 6 * i + 3, 256, 30, row->help, 8, 3, false);
+        portHelpSprite(&spr, 6 * i + 3, row->help);
         sobj = omGObjAddSprite(D_800E8344_A0F8D4, &spr);
         SET_SPRITE_POS(sobj->sprite, 41, 168 + PORT_OPT_BOX_DY);
         sobj->sprite.attr |= SP_HIDDEN;
         for (k = 0; k < 2; k++) {
-            portTextSprite(&spr, 6 * i + 4 + k, 256, 30, row->valueHelp[k], 8, 3, false);
+            portHelpSprite(&spr, 6 * i + 4 + k, row->valueHelp[k]);
             if (k == 0) {
                 port_OptHelp[i] = ohCreateSprite(0xE, ohUpdateDefault, 0, 0x80000000, renDrawSprite, 1, 0x80000000,
                                                  -1, &spr, 0, NULL, 1);
@@ -586,10 +740,13 @@ s32 OptionsMenu_Main(void) { /* was func_800E6B2C_A0E0BC */
     omDeleteGObj(D_800E835C_A0F8EC);
     omDeleteGObj(D_800E8360_A0F8F0);
 #ifdef PORT
-    omDeleteGObj(port_OptValues[0]);
-    omDeleteGObj(port_OptHelp[0]);
-    omDeleteGObj(port_OptValues[1]);
-    omDeleteGObj(port_OptHelp[1]);
+    {
+        s32 i;
+        for (i = 0; i < PORT_OPT_ROWS; i++) {
+            omDeleteGObj(port_OptValues[i]);
+            omDeleteGObj(port_OptHelp[i]);
+        }
+    }
 #endif
     return 12;
 }
