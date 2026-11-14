@@ -21,6 +21,14 @@
 //                RTW_REPO=~/Code/retrowser-wt-motionopt, and a build whose shipped manifest keeps the object form)
 //                no ☰ Motion choice, no motion while option 3 is Off, the host's Allow prompt when the game's menu
 //                turns it On, rtw_motion after the tap, the sensors stopped when Off again;
+//         mouse  (F6, not in the default list) desktop 1024x768: option 4 "Mouse Aim" Off then On again in the game's
+//                Options menu (reported, passed back after a reload), no pointer lock asked outside a course; the SAVE
+//                continued to the Beach: the module asks for the mouse in camera control, the host's click captures
+//                it (the game does not see that click), left clicks take the tutorial's pictures ("[snap] photo taken
+//                ... (mouse click)"), mouse motion turns the view by 0.08 degree a pixel (the "[mouse] movement
+//                stopped" line, +-5 %), the right button held zooms and a left click then takes a picture, a middle
+//                click throws an apple, the pause menu gives the mouse back (and camera control asks again), Esc
+//                releases it and the module does not ask again by itself;
 //         wrong  a ROM with one byte changed: the host's wrong-ROM warning, then the module's plain refusal;
 //         offline  every server stopped, the network off: reload, boot from the caches and the remembered ROM.
 //         beach  (F2, not in the default list) phone portrait 390x844 at dpr 3, the SAVE continued to the Beach with
@@ -430,6 +438,7 @@ async function options() {
     await press(page, 'KeyX'); await sleep(1200);
     const snapShown = async () => { const b = await page.locator('[data-touch=x16]').first().boundingBox().catch(() => null); return !!b && b.width > 0; };
     const snapBefore = await snapShown();
+    await press(page, 'ArrowDown'); await sleep(1000);    // F6: Mouse Aim (left as it is)
     await press(page, 'ArrowDown'); await sleep(1000);    // Return
     await press(page, 'KeyX');
     const ch = await L.wait(/rtw: option 1 = 0 changed in the game's Options menu/, 20);
@@ -482,10 +491,10 @@ async function options() {
 
 // F5: the Options menu on a phone (dpr 3, as beach), portrait 390x844 and landscape 844x390: the whole page and the
 // picture alone with the menu open, then each port row chosen and its value help shown (A on the row, B back).
-// Pictures only, to look at (MENU_ROWS: how many port rows to visit below "Control Stick Setup", default 3).
+// Pictures only, to look at (MENU_ROWS: how many port rows to visit below "Control Stick Setup", default 4).
 async function menu() {
   const phone = await chromium.launch({ executablePath: chromePath, headless: true, args: [...launchArgs, '--force-device-scale-factor=3'] });
-  const rows = +(process.env.MENU_ROWS || 3);
+  const rows = +(process.env.MENU_ROWS || 4);
   try {
     for (const [tag, vp] of [['portrait', { width: 390, height: 844 }], ['landscape', { width: 844, height: 390 }]]) {
       const ctx = await phone.newContext({ viewport: vp, deviceScaleFactor: 3, isMobile: true, hasTouch: true, reducedMotion: 'reduce' });
@@ -980,6 +989,225 @@ async function motion() {
     writeFileSync(join(outDir, 'log-motion-webkit.txt'), await L.allText());
   } finally { L?.stop(); await ctx.close(); }
 }
+// F6: mouse aim on a desktop (1024x768, no touch). The host's pointer lock: the module calls rtw_pointer_lock(1), the
+// host shows [data-field=mouse-catch] ("Click to use the mouse"), a click on it captures the mouse (data-locked 1) and
+// rtw_mouse then carries the motion (movementX/Y) and the buttons; Esc (here: document.exitPointerLock, what the
+// browser does on Esc) releases it.
+async function mouse() {
+  const ctx = await newCtx();
+  const page = await ctx.newPage();
+  page.on('pageerror', (e) => errors.push(e.message));
+  const L = logger(page);
+  const catcher = async () => page.getAttribute('[data-field=mouse-catch]', 'data-locked', { timeout: 500 }).catch(() => null);
+  const lockedNow = () => page.evaluate(() => !!document.pointerLockElement);
+  const toOptions = async () => {
+    await sleep(3000);
+    await press(page, 'Enter', 200); await sleep(5000);
+    await press(page, 'Enter', 200); await sleep(2500);
+    await press(page, 'ArrowDown'); await sleep(1500);
+    await press(page, 'KeyX'); await sleep(3500);
+  };
+  // the Options menu's Mouse Aim row (7 rows below Screen): A, left (On) or right (Off), A, down to Return, A
+  const setMouseAim = async (on) => {
+    for (let i = 0; i < 7; i++) { await press(page, 'ArrowDown'); await sleep(700); }
+    await press(page, 'KeyX'); await sleep(1200);
+    await press(page, on ? 'ArrowLeft' : 'ArrowRight'); await sleep(1200);
+    await shot(page, `mouse-option-${on ? 'on' : 'off'}`);
+    await press(page, 'KeyX'); await sleep(1200);
+    await press(page, 'ArrowDown'); await sleep(1000);
+    await press(page, 'KeyX');
+  };
+  const boot = async (stored) => {
+    console.log('mouse: ' + await openGame(page, { stored, remember: true }));
+    await page.waitForSelector('[data-state=playing]', { timeout: 180000 });
+    return L.wait(/rtw: game started/, 90);
+  };
+  const photos = async () => ((await L.text()).match(/\[snap\] photo taken.*\(mouse click\)/g) || []).length;
+  const click = async (button = 'left', ms = 90) => { await page.mouse.down({ button }); await sleep(ms); await page.mouse.up({ button }); };
+  // a move of dx, dy CSS pixels in steps of 10 from where the mouse is (the host sums movementX/Y over a display
+  // frame; every move counts while captured, so the position is kept here and the tests move back and forth)
+  const pos = { x: 500, y: 380 };
+  const move = async (dx, dy) => {
+    const n = Math.max(Math.abs(dx), Math.abs(dy)) / 10;
+    for (let i = 0; i < n; i++) { pos.x += dx / n; pos.y += dy / n; await page.mouse.move(pos.x, pos.y); await sleep(16); }
+  };
+  const relock = async () => {
+    if (await catcher() === '1') return true;
+    await page.waitForSelector('[data-field=mouse-catch]', { timeout: 10000 }).catch(() => {});
+    await page.click('[data-field=mouse-catch]').catch(() => {});
+    return page.waitForSelector('[data-field=mouse-catch][data-locked="1"]', { timeout: 5000 }).then(() => true, () => false);
+  };
+  try {
+    // 1. option 4 in the game's Options menu: Off, reported; after a reload passed back as 0, then On again
+    const st0 = await boot(false);
+    const t0 = await L.text();
+    check('mouse: the host passes option 4 (Mouse Aim) at start, default On', st0 && /rtw: option 4 = 1 from the host/.test(t0),
+      (t0.match(/rtw: option 4.*/) || ['no rtw_option 4 line'])[0]);
+    await toOptions();
+    await shot(page, 'mouse-options-menu');
+    await setMouseAim(false);
+    const off = await L.wait(/rtw: option 4 = 0 changed in the game's Options menu/, 20);
+    check('mouse: Mouse Aim -> Off in the game\'s menu is reported (rtw_option_changed 4 = 0)', !!off, off ?? 'no line');
+    check('mouse: no pointer lock asked in the title and menus', !/pointer lock asked/.test(await L.allText()) && !(await page.$('[data-field=mouse-catch]')));
+    await sleep(1500);
+    await L.reset();
+    await page.reload();
+    await boot(true);
+    const t1 = await L.text();
+    check('mouse: after a reload the host passes the remembered Off (rtw_option 4 = 0)', /rtw: option 4 = 0 from the host/.test(t1),
+      (t1.match(/rtw: option 4.*/) || ['no rtw_option 4 line'])[0]);
+    await toOptions();
+    await setMouseAim(true);
+    const on = await L.wait(/rtw: option 4 = 1 changed in the game's Options menu/, 20);
+    check('mouse: Mouse Aim -> On again is reported (rtw_option_changed 4 = 1)', !!on, on ?? 'no line');
+    await sleep(1500);
+    await L.reset();
+    await page.reload();
+    await boot(true);
+    const t2 = await L.text();
+    check('mouse: after a second reload the host passes On (rtw_option 4 = 1)', /rtw: option 4 = 1 from the host/.test(t2),
+      (t2.match(/rtw: option 4.*/) || ['no rtw_option 4 line'])[0]);
+
+    // 2. the save, the Beach: the module asks for the mouse when the player gets the camera
+    await page.click('[data-action=menu]'); await sleep(500);
+    await L.reset();
+    await page.setInputFiles('[data-field=import-save]', SAVE);
+    const st = await L.wait(/rtw: game started.*save from the host/, 90);
+    if (await page.$('[data-action=close-menu]')) await page.click('[data-action=close-menu]', { timeout: 5000 }).catch(() => {});
+    check('mouse: the save imported', !!st, st ?? '');
+    let asked = null;
+    const t3 = Date.now();
+    while (Date.now() - t3 < 90000 && !asked) {
+      await press(page, 'KeyX'); await sleep(2000);
+      asked = (await L.text()).match(/.*rtw: pointer lock asked.*/)?.[0] ?? null;
+    }
+    const shown = await catcher();
+    check('mouse: in the course the module asks for the mouse (rtw_pointer_lock 1), the host shows its "click to use the mouse"',
+      !!asked && shown === '0', `${asked ?? 'no rtw: pointer lock line'}; mouse-catch data-locked ${shown}`);
+    // A through the course's first messages (keyboard; the mouse is not captured yet)
+    for (let i = 0; i < 10; i++) { await press(page, 'KeyX'); await sleep(2000); }
+    await shot(page, 'mouse-ask', true);
+    // 3. the capturing click is the host's
+    await L.reset();
+    const locked = await relock();
+    await sleep(1500);
+    const tl = await L.text();
+    check('mouse: a click on the picture captures the mouse; that click does not reach the game',
+      locked && await lockedNow() && !/\[snap\] photo taken|\[mouse\] (A|click)/.test(tl),
+      `data-locked ${await catcher()}; ${tl.match(/\[(snap|mouse)\].*/)?.[0] ?? 'no [snap] / [mouse] line'}`);
+    // 4. left clicks: the tutorial's pictures ("Press Z to aim" holds the cart until 3 photos), until the cart moves
+    await page.mouse.move(pos.x, pos.y);
+    let taken = 0, moving = 0, firstPhoto = null;
+    for (let i = 0; i < 14 && moving <= 0.05; i++) {
+      await relock();
+      await L.reset();
+      await click('left');
+      const p = await L.wait(/\[snap\] photo taken.*\(mouse click\)/, 5);
+      if (p) { taken++; firstPhoto ??= p; }
+      await sleep(1500);
+      if (taken >= 3) {
+        const a = await shot(page, `mouse-cart-${i}a`); await sleep(1000); const b = await shot(page, `mouse-cart-${i}b`);
+        moving = pixelDiff(a, b);
+        if (moving <= 0.05) { await press(page, 'KeyX'); await sleep(1500); }   // a message after the pictures
+      }
+    }
+    check('mouse: left clicks take pictures (the shutter sequence started by the mouse: "[snap] photo taken ... (mouse click)")',
+      taken >= 3, `${taken} picture(s); ${firstPhoto ? firstPhoto.replace(/^.*\[snap\] /, '') : 'no photo'}`);
+    check('mouse: the Beach, the cart moving (camera control)', moving > 0.05, `${(moving * 100).toFixed(0)} % of pixels changed in 1 s`);
+    // 5. motion turns the view: 400 px right = +32 degrees, 200 px up = +16 (0.08 degree a pixel), the game's
+    // scenes take the camera now and then ("... dropped outside camera control"): then A and again
+    const turn = async (dx, dy, want, axis) => {
+      let r = null;
+      for (let i = 0; i < 6 && !(r && r.ok); i++) {
+        if (i) { console.log(`  mouse: no turn (${r.line}); A, then again`); await press(page, 'KeyX'); await sleep(2500); }
+        await relock();
+        await L.reset();
+        const b = await shot(page, `mouse-turn-${axis}-${i}-before`);
+        await move(dx, dy);
+        const line = await L.wait(/\[mouse\] movement stopped/, 6);
+        const a = await shot(page, `mouse-turn-${axis}-${i}-after`);
+        const m = line && line.match(/yaw ([+-][\d.]+), pitch ([+-][\d.]+)/);
+        const got = m ? +m[axis === 'yaw' ? 1 : 2] : null;
+        r = { ok: got != null && Math.abs(got - want) <= 0.05 * Math.abs(want) && /0\.00 degrees dropped/.test(line),
+          line: line ? line.replace(/^.*\[mouse\] /, '') : 'no "[mouse] movement stopped" line', change: pixelDiff(b, a), got };
+      }
+      return r;
+    };
+    const right = await turn(400, 0, 32, 'yaw');
+    check('mouse: 400 px to the right turns the view right by 32 degrees (+-5 %)', right.ok,
+      `${right.line}; picture change ${(right.change * 100).toFixed(0)} %`);
+    const left = await turn(-400, 0, -32, 'yaw');
+    check('mouse: 400 px back to the left: -32 degrees (+-5 %)', left.ok, `${left.line}; picture change ${(left.change * 100).toFixed(0)} %`);
+    const up = await turn(0, -200, 16, 'pitch');
+    check('mouse: 200 px up tilts the view up by 16 degrees (+-5 %)', up.ok, `${up.line}; picture change ${(up.change * 100).toFixed(0)} %`);
+    await move(0, 200);   // back level
+    await sleep(800);
+    // 6. the right button held: zoom (hold), a left click while zoomed: a picture; let go: zoomed out
+    let zoomOk = false, zoomPhoto = null, zoomOut = null;
+    for (let i = 0; i < 4 && !(zoomOk && zoomPhoto && zoomOut); i++) {
+      if (i) { await press(page, 'KeyX'); await sleep(2500); }
+      await relock();
+      await L.reset();
+      await page.mouse.down({ button: 'right' });
+      zoomOk = !!(await L.wait(/\[snap\] enter -> aim .*right button/, 5));
+      await sleep(600);
+      await shot(page, 'mouse-zoomed-aim', true);
+      await move(-80, 0);
+      await move(80, 0);
+      await click('left');
+      zoomPhoto = await L.wait(/\[snap\] photo taken.*\(mouse click\)/, 5);
+      await sleep(400);
+      await page.mouse.up({ button: 'right' });
+      zoomOut = await L.wait(/\[snap\] (aim -> leave|leave -> idle) .*right button/, 5);
+      await sleep(1000);
+    }
+    check('mouse: the right button held zooms in; a left click then takes a picture; let go: zoomed out',
+      zoomOk && zoomPhoto && zoomOut, `${zoomOk ? 'zoomed' : 'no zoom'}; ${zoomPhoto ? zoomPhoto.replace(/^.*\[snap\] /, '') : 'no photo'}; ${zoomOut ? 'zoomed out' : 'not zoomed out'}`);
+    // 7. the middle click: an apple (A while zoomed out)
+    let apple = null;
+    for (let i = 0; i < 4 && !apple; i++) {
+      if (i) { await press(page, 'KeyX'); await sleep(2500); }
+      await relock();
+      await L.reset();
+      await click('middle');
+      apple = await L.wait(/\[mouse\] A \(middle click: apple\)/, 4);
+    }
+    check('mouse: a middle click throws an apple (A while zoomed out)', !!apple, apple ?? (await L.text()).match(/\[mouse\].*/)?.[0] ?? 'no line');
+    await sleep(1500);
+    // 8. the pause menu gives the mouse back; camera control asks again
+    await relock();
+    await L.reset();
+    await press(page, 'Enter', 150);
+    const given = await L.wait(/rtw: pointer lock given back/, 6);
+    await sleep(800);
+    const lockP = await lockedNow(), catchP = await page.$('[data-field=mouse-catch]');
+    await shot(page, 'mouse-pause', true);
+    check('mouse: the pause menu gives the mouse back (rtw_pointer_lock 0: not captured, no "click to use the mouse")',
+      !!given && !lockP && !catchP, `${given ?? 'no line'}; locked ${lockP}; mouse-catch ${!!catchP}`);
+    await press(page, 'Enter', 150);   // Continue
+    const again = await L.wait(/rtw: pointer lock asked/, 10);
+    check('mouse: back in the course the module asks again', !!again, again ?? 'no line');
+    // 9. Esc (the browser releases the lock): the host shows its prompt again; the module does not ask by itself
+    await relock();
+    await L.reset();
+    await page.keyboard.press('Escape');
+    await sleep(500);
+    let how = 'Escape key';
+    if (await lockedNow()) { await page.evaluate(() => document.exitPointerLock()); how = 'document.exitPointerLock (the Escape key does not release it in headless Chrome)'; }
+    await sleep(3000);
+    const te = await L.text();
+    check('mouse: Esc releases the mouse; the host keeps its prompt, the module does not call again',
+      !(await lockedNow()) && await catcher() === '0' && !/rtw: pointer lock (asked|given back)/.test(te),
+      `${how}; data-locked ${await catcher()}; ${te.match(/rtw: pointer lock.*/)?.[0] ?? 'no rtw_pointer_lock call'}`);
+    await L.reset();
+    await click('left');   // a click on the prompt captures again: no picture
+    await sleep(1500);
+    check('mouse: the click that captures it again takes no picture', await lockedNow() && (await photos()) === 0,
+      `locked ${await lockedNow()}; ${(await L.text()).match(/\[snap\] photo taken.*/)?.[0] ?? 'no photo'}`);
+    writeFileSync(join(outDir, 'log-mouse.txt'), await L.allText());
+  } finally { L.stop(); await ctx.close(); }
+}
+
 // share of pixels whose colour changed by more than 48 (sum of |dR|+|dG|+|dB|) between two same-size screenshots
 function pixelDiff(fa, fb) {
   const a = pngPixels(fa), b = pngPixels(fb);
@@ -1040,7 +1268,7 @@ async function offline() {
 try {
   for (const p of PHASES) {
     console.log(`== ${p}`);
-    try { await ({ desk, title, touch, options, menu, beach, motion, motionopt, wrong, offline })[p](); } catch (e) { check(`${p}: ran`, false, e.stack || String(e)); }
+    try { await ({ desk, title, touch, options, menu, beach, motion, motionopt, mouse, wrong, offline })[p](); } catch (e) { check(`${p}: ran`, false, e.stack || String(e)); }
   }
   check('no page errors', errors.length === 0, errors.slice(0, 3).join(' | '));
 } finally {
