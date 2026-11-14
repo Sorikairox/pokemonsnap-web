@@ -23,18 +23,26 @@ rm -rf "$D"; mkdir -p "$D"
 python3 -I port/rtw/romfill.py "$Z64" "$L" "$D"
 cp "$L/pokemonsnap.js" "$D/"
 cp port/rtw/retrowser.json "$D/"
-# TODO(retrowser host, F3): `controls.motion` (motion aim) is a new key of the host's interface. A check tool (and
-# host) whose schema does not know it yet rejects the whole manifest (additionalProperties: false), so it is left out
-# of the shipped copy while RTW_MJS does not know it (a no-op with a tool that does); the source manifest
-# port/rtw/retrowser.json keeps it. Remove this step once every host in use has the key.
-node -e '
-const fs = require("fs"), [tool, man] = process.argv.slice(1), src = fs.readFileSync(tool, "utf8"), m = JSON.parse(fs.readFileSync(man, "utf8"));
-const knows = (k) => new RegExp(`"${k}"\\s*:\\s*\\{`).test(src), gone = [];
-if (m.controls && "motion" in m.controls && !knows("motion")) { delete m.controls.motion; gone.push("controls.motion"); }
-if (gone.length) {
-  console.log(`rtw: TODO: the check tool does not know ${gone.join(", ")} yet: left out of the shipped manifest`);
-  fs.writeFileSync(man, JSON.stringify(m, null, 2) + "\n");
-}' "$RTW_MJS" "$D/retrowser.json"
+# TODO(retrowser host, F3 / F5): `controls.motion` (motion aim) is new in the host's interface: F3 `true`, F5 the
+# object { "when": 3 } (motion aim switched by option 3, the Options menu's "Motion Aim" row). A check tool (and host)
+# whose schema does not know a form rejects the whole manifest (additionalProperties: false / type boolean). The
+# shipped copy is first checked as written; if the tool rejects controls.motion, the object form falls back to `true`
+# (an older host: its own ☰ Motion choice, and the module also needs option 3 on), and if that is rejected too the key
+# is left out (no motion aim). The source manifest port/rtw/retrowser.json keeps the new form. Remove this step once
+# every host in use knows it.
+motion_fallback() {
+  node -e '
+const fs = require("fs"), man = process.argv[1], m = JSON.parse(fs.readFileSync(man, "utf8"));
+if (!m.controls || !("motion" in m.controls)) process.exit(1);
+if (typeof m.controls.motion === "object") { m.controls.motion = true; console.log("rtw: TODO: the check tool does not know controls.motion { when }: shipped as motion: true"); }
+else { delete m.controls.motion; console.log("rtw: TODO: the check tool does not know controls.motion: left out of the shipped manifest"); }
+fs.writeFileSync(man, JSON.stringify(m, null, 2) + "\n");' "$D/retrowser.json"
+}
+for _ in 1 2 3; do
+  node "$RTW_MJS" hash "$D" > /dev/null
+  if out=$(node "$RTW_MJS" check "$D" 2>&1); then break; fi
+  echo "$out" | grep -q "motion" && motion_fallback || { echo "$out"; exit 1; }
+done
 node "$RTW_MJS" hash "$D"
 node "$RTW_MJS" check "$D" --rom "$Z64"
 [ -f "$RTW_ROM" ] && node "$RTW_MJS" check "$D" --rom "$RTW_ROM"

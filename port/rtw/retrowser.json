@@ -14,12 +14,13 @@
   "hz": 60,
   "save": { "kind": "flash", "size": 131072 },
   "controls": {
-    "motion": true,
-    "extra": [{ "bit": 16, "label": "Snap" }, { "bit": 17, "label": "Shutter" }]
+    "motion": { "when": 3 },
+    "extra": [{ "bit": 16, "label": "Snap", "when": 1 }, { "bit": 17, "label": "Shutter" }]
   },
   "options": [
     { "id": 1, "label": "Snap button", "type": "bool", "default": 1, "inGame": true },
-    { "id": 2, "label": "Sharp pixels", "type": "bool", "default": 0, "inGame": true }
+    { "id": 2, "label": "Sharp pixels", "type": "bool", "default": 0, "inGame": true },
+    { "id": 3, "label": "Motion aim", "type": "bool", "default": 0, "inGame": true }
   ],
   "license": "MIT",
   "source": "https://github.com/Sorikairox/pokemonsnap-web"
