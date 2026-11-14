@@ -43,11 +43,12 @@ Needs `./pokemonsnap.z64` (`port/docker/run.sh rom PATH`) and the local retrowse
 | `hz` | 60 | NTSC; informative (self-running) |
 | `save` | `flash`, 131072 | the cartridge's FlashRAM, console byte order (SAVE.md) |
 | `license`, `source` | `MIT`, github.com/Sorikairox/pokemonsnap-web | public repo |
-| `controls.extra` | bit 16 "Snap" | F1: the Snap button (FEATURES.md) |
+| `controls.extra` | bit 16 "Snap", `"when": 1` | F1: the Snap button (FEATURES.md); F5: shown only while option 1 is on |
 | | bit 17 "Shutter" | F4: one tap = one picture; an ordinary extra button (the `place: "corner"` zone and "Knock to shoot" were removed by the user) |
-| `controls.motion` | `true` | F3: the module takes `rtw_motion` (motion aim) |
+| `controls.motion` | `{ "when": 3 }` | F3: the module takes `rtw_motion` (motion aim); F5: switched by option 3 (the game's "Motion Aim" row), the host's ☰ Motion choice hidden |
 | `options` | id 1 "Snap button", bool, default 1, `inGame` | F1: shown in the game's Options menu, kept by the host |
 | | id 2 "Sharp pixels", bool, default 0, `inGame` | F2: the Options menu's "Pixels Smooth / Sharp" row, kept by the host |
+| | id 3 "Motion aim", bool, default 0, `inGame` | F5: the Options menu's "Motion Aim On / Off" row; the host reads the gyroscope only while it is on |
 | no `net`, `picture`, `icon` | | nothing needs them yet |
 
 ## Build (`port_build.py --rtw`, `link_rtw`)
@@ -91,15 +92,17 @@ Shared-code hooks (weak defaults keep the harness as it was): `port_vbe_fix_defe
 - **Rumble**: `__osMotorAccess` -> `port_rumble` -> `rtw_rumble(channel, on)`. Not reached: the port reports no pak,
   and the game never starts the motor (`contRumbleStart` has no caller; only `scPreNMIDefault` sends init + stop).
 - **Options** (F1, F2): export `rtw_option(id, value)` -> `port_option_set` (pc_options.c); import
-  `rtw_option_changed` called when the game's Options menu changes one (1 Snap button, 2 Pixels). `rtw_input` passes bit 16 (Snap) to `port_set_pad`.
+  `rtw_option_changed` called when the game's Options menu changes one (1 Snap button, 2 Pixels, 3 Motion Aim). `rtw_input` passes bit 16 (Snap) to `port_set_pad`.
 - **Motion** (F3): export `rtw_motion(port, yaw, pitch)` (port 0; 1/1024 degree, host-corrected for orientation)
   -> `port_motion_add`; logged once (`rtw: motion aim: first rotation from the host`). **Shutter** (F4): `rtw_input`
   keeps bits 0-17; a bit-17 press seen by any `rtw_input` reaches the next retrace.
-- **New manifest key and the check tool** (TODO, F3): `controls.motion` is new in the host's interface. A check tool
-  / host whose schema does not have it rejects the manifest (`additionalProperties: false`), so `build.sh` leaves it
-  out of the shipped `retrowser.json` while `RTW_MJS` does not know it (it prints `rtw: TODO: ...`); the source
-  manifest keeps it. With it left out the host offers no Motion aim. `rtw_motion` is reported as an unknown
-  export (a warning) by such a tool.
+- **New manifest key and the check tool** (TODO, F3 / F5): `controls.motion` is new in the host's interface, and F5's
+  object form `{ "when": 3 }` is newer still (retrowser branch `motion-option`, not deployed yet). A check tool / host
+  whose schema does not have a form rejects the manifest (`additionalProperties: false`, `type: boolean`), so
+  `build.sh` checks the shipped `retrowser.json` as written and, if the tool rejects `controls.motion`, ships
+  `motion: true` instead (prints `rtw: TODO: ...`), then no key; the source manifest keeps the object. With
+  `motion: true` the host offers its own ☰ Motion aim and the module still needs option 3 on. `rtw_motion` is reported
+  as an unknown export (a warning) by such a tool.
 - **Imports**: `rtw_log`, `rtw_build_id`, `rtw_rumble`, `rtw_option_changed`. Not used yet: `rtw_export_file` (album photos as PNG would
   be a feature behind an option).
 - Test hooks: `Module.rtwManual` (no pacing; `node_host.mjs` steps `_port_rtw_retrace` itself), `port_rtw_test_log`.
@@ -160,5 +163,11 @@ degrees before the lock), the roll locks "axes: webkit (locked)" and the turn ri
 notes: a Playwright screenshot puts its own emulated orientation (90) back over the CDP override, so none is taken
 between the turns at 270; a turn the game drops (a message or a Pokemon's scene: "... degrees dropped outside camera
 control") is tried again. (The host's earlier corner trigger zone and "Knock to shoot" were removed by the user.)
+
+F5: `options` also turns Motion Aim On (option 3) and checks that the Snap touch button (`"when": 1`) leaves the
+touch layout at once; `menu` (opt-in) takes phone portrait / landscape pictures of the Options menu; `motionopt`
+(opt-in, `RTW_REPO=~/Code/retrowser-wt-motionopt`, a build made with that tool so `motion: { when: 3 }` ships): no ☰
+Motion choice, no motion while option 3 is Off, the host's Allow prompt when the game turns it On, rtw_motion after
+the tap, a reload passes it back and asks again, Off stops the sensors.
 
 Checklist items not covered: a real phone (WebKit worker, real dpr), a gamepad, export of the save into an emulator.

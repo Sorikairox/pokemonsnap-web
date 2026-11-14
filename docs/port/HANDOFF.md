@@ -7,6 +7,25 @@ default branch `web`; retrowser build on the orphan branch `rtw-dist`; MIT licen
 orchestrator pushes, only to `pub`; never to `origin` (ethteck). Rebuild `rtw-dist` with `port/rtw/build.sh` (check
 `--rom` OK) after port changes. Older entries saying "private" / "never push" describe the state at their time.
 
+## F5 — 2026-11-14: native-looking Options rows, Snap button hidden when Off, Motion Aim in the game's menu
+
+Notes: **docs/port/notes/F5.md**. `web` commits 3d06d0c, e0a856c, fbbfc22 and this docs commit; retrowser worktree
+`~/Code/retrowser-wt-motionopt` branch `motion-option` (34b68a5, 3321074, e5f1df1, 785c4a1, 621d5a3; not merged, not
+deployed).
+1. The game's Options rows are IA16 pictures in a face no game font has; the port's rows ("Snap Button", "Pixels",
+   new "Motion Aim") are now composed at run time from letters cut out of those pictures (positions in the source,
+   pixels from the player's ROM), native bullet / brackets / kerning / colours; descriptions reworded with the
+   available letters, fitting the box. Return y 185, box y 198-231.
+2. Snap extra `"when": 1`: the host drops the touch button as soon as the game reports Snap Button Off (e2e).
+3. Port option 3 "Motion Aim" (default Off), manifest `controls.motion: { "when": 3 }`: the host (branch above) reads
+   the gyroscope only while it is on, hides its ☰ Motion, asks for the iOS permission with an Allow prompt.
+   **Deploy the host before shipping that manifest** (the deployed host validates `motion` as boolean and would refuse
+   the game); build.sh with the deployed tool ships `motion: true` meanwhile.
+Verified: Beach route byte-identical to 3dadffe's (7 PNGs, WAV, flash, read-back); gfx ALL OK; port-test 5000 OK;
+matching build OK; build.sh check OK with both tools, romscan 0; e2e PASS (desk, touch, options, menu, wrong,
+offline) and motionopt PASS on the worktree host. **rtw-dist must be rebuilt / pushed by the orchestrator.**
+Downloads: none.
+
 ## F1 + R2 + F2 — 2026-11-09: touch camera, renderer polish, sharp pixels, e2e pacing check
 
 **F1** (worktree, merged by the orchestrator in aa567d1; notes `docs/port/notes/F1.md`): the game already has a zoom
